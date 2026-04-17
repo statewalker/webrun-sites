@@ -1,0 +1,16 @@
+{
+  "name": "@statewalker/site-builder-demo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser demo: webrun-site-builder + webrun-http-browser relay + webrun-files-mem, dynamic-imported per-request server endpoint",
+  "scripts": {
+    "start": "python3 -m http.server --directory ../../../.. 5173",
+    "example": "pnpm --filter @statewalker/webrun-http-browser run build && pnpm --filter @statewalker/webrun-site-builder run build && pnpm run start"
+  },
+  "dependencies": {
+    "@statewalker/webrun-files-mem": "catalog:",
+    "@statewalker/webrun-http-browser": "workspace:*",
+    "@statewalker/webrun-site-builder": "workspace:*"
+  }
+}
