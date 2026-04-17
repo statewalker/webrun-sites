@@ -3,14 +3,19 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Browser demo: webrun-site-builder + webrun-http-browser relay + webrun-files-mem, dynamic-imported per-request server endpoint",
+  "description": "Vite demo: webrun-site-builder + webrun-http-browser relay + webrun-files-mem, dynamic-imported per-request server endpoint",
   "scripts": {
-    "start": "python3 -m http.server --directory ../../../.. 5173",
-    "example": "pnpm --filter @statewalker/webrun-http-browser run build && pnpm --filter @statewalker/webrun-site-builder run build && pnpm run start"
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 5173"
   },
   "dependencies": {
-    "@statewalker/webrun-files-mem": "catalog:",
+    "@statewalker/webrun-files-mem": "0.7.2",
     "@statewalker/webrun-http-browser": "workspace:*",
     "@statewalker/webrun-site-builder": "workspace:*"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0",
+    "vite-plugin-static-copy": "^2.1.0"
   }
 }

@@ -10,7 +10,10 @@
       code { background: #f4f4f5; padding: 0 0.25rem; border-radius: 0.2rem; }
       .panel { display: flex; gap: 1rem; margin-top: 1rem; }
       iframe { flex: 1; height: 26rem; border: 1px solid #e5e5e5; }
-      .log { width: 22rem; border: 1px solid #e5e5e5; padding: 0.5rem 1rem; font-family: monospace; font-size: 0.85rem; overflow: auto; }
+      .log {
+        width: 22rem; border: 1px solid #e5e5e5; padding: 0.5rem 1rem;
+        font-family: monospace; font-size: 0.85rem; overflow: auto;
+      }
       .log p { margin: 0.25rem 0; }
       .log .err { color: #b91c1c; }
     </style>
@@ -21,11 +24,11 @@
       A <code>SiteBuilder</code> mounts two <code>MemFilesApi</code>
       instances — one for the client (HTML/JS/CSS), one for the server —
       plus a dynamic <code>/api/*</code> endpoint. The endpoint handler
-      does <code>await import(`${base}/server/api/index.js`)</code>:
-      the imported module is served as JS by <em>the same</em> site
-      handler (through the second files mount), evaluated by the browser,
-      and its default export is invoked per request. Client fetches go
-      through the relay ServiceWorker exactly like a normal HTTP site.
+      fetches <code>server/api/index.js</code> through the same service
+      via <code>callHttpService</code>, wraps the response in a
+      <code>blob:</code> URL, and <code>import()</code>s it to invoke
+      its default export per request. Client fetches go through the
+      relay ServiceWorker exactly like a normal HTTP site.
     </p>
 
     <div class="panel">
@@ -33,150 +36,6 @@
       <div class="log" id="log"><p>Loading…</p></div>
     </div>
 
-    <script type="module">
-      import { MemFilesApi } from "/workspaces/webrun-files/packages/webrun-files-mem/dist/esm/index.js";
-      import * as WebRunHttp from "/workspaces/webrun-wire/packages/webrun-http-browser/dist/index.js";
-      import { SiteBuilder } from "/workspaces/webrun-wire/packages/webrun-site-builder/dist/index.js";
-
-      const logEl = document.querySelector("#log");
-      const log = (msg, isError = false) => {
-        const p = document.createElement("p");
-        if (isError) p.className = "err";
-        p.textContent = msg;
-        logEl.appendChild(p);
-      };
-
-      async function populate(files, entries) {
-        for (const [path, content] of Object.entries(entries)) {
-          const bytes = typeof content === "string" ? new TextEncoder().encode(content) : content;
-          await files.write(path, [bytes]);
-        }
-      }
-
-      try {
-        logEl.innerHTML = "";
-        const connection = await WebRunHttp.newRemoteRelayChannel();
-        log("Relay channel opened.");
-
-        const SERVICE_KEY = "DEMO_SITE";
-        const siteBaseUrl = `${connection.baseUrl}~${SERVICE_KEY}`;
-
-        // --- client/ — index.html + JS + CSS ---
-        const clientFiles = new MemFilesApi();
-        await populate(clientFiles, {
-          "/index.html": `<!doctype html>
-<html><head>
-  <meta charset="utf-8">
-  <title>Hosted client</title>
-  <link rel="stylesheet" href="./style.css">
-</head><body>
-  <h2>Hosted in-browser site</h2>
-  <label>Name: <input id="name" value="World"></label>
-  <pre id="out">…</pre>
-  <script type="module" src="./main.js"></scr${"ipt>"}
-</body></html>`,
-          "/style.css": `body { font-family: system-ui, sans-serif; margin: 1rem; }
-h2 { color: navy; }
-pre { background: #f4f4f5; padding: 0.5rem; border-radius: 0.25rem; }`,
-          "/main.js": `const input = document.querySelector("#name");
-const out = document.querySelector("#out");
-async function refresh() {
-  // Client lives at /client/, API at /api/* — escape the sub-path.
-  const response = await fetch("../api/greet?name=" + encodeURIComponent(input.value));
-  out.textContent = JSON.stringify(await response.json(), null, 2);
-}
-input.addEventListener("input", refresh);
-refresh();`,
-        });
-
-        // --- server/api/index.js — default-export a fetch handler ---
-        const serverFiles = new MemFilesApi();
-        await populate(serverFiles, {
-          "/api/index.js": `export default async function handleRequest(request) {
-  const url = new URL(request.url);
-  const name = url.searchParams.get("name") ?? "anonymous";
-  return Response.json({
-    message: "Hello from the dynamically-imported server, " + name + "!",
-    at: url.pathname,
-    now: new Date().toISOString(),
-  });
-}`,
-        });
-
-        // --- compose the site ---
-        //
-        // The endpoint handler runs in *this* page, which is not under the
-        // relay ServiceWorker's scope — so a direct `import(url)` would miss
-        // the SW and hit the network with a 404. Instead we fetch the module
-        // source through the same port that drives the service
-        // (`callHttpService` goes straight to the handler, skipping the SW),
-        // wrap it in a `blob:` URL with `text/javascript`, and let the
-        // browser's standard module loader take it from there.
-        async function importFromService(path) {
-          const request = new Request(`${siteBaseUrl}${path}`);
-          const response = await WebRunHttp.callHttpService(request, {
-            key: SERVICE_KEY,
-            port: connection.port,
-          });
-          if (!response.ok) {
-            throw new Error(`fetch ${path} → ${response.status}`);
-          }
-          const source = await response.text();
-          const blobUrl = URL.createObjectURL(
-            new Blob([source], { type: "text/javascript" }),
-          );
-          try {
-            return await import(blobUrl);
-          } finally {
-            URL.revokeObjectURL(blobUrl);
-          }
-        }
-
-        const siteHandler = new SiteBuilder()
-          .setFiles("/client", clientFiles)
-          .setFiles("/server", serverFiles)
-          .setEndpoint("/api/*", async (request) => {
-            const module = await importFromService("/server/api/index.js");
-            return module.default(request);
-          })
-          .setErrorHandler((error, request) => {
-            log(`Error in ${request.method} ${request.url}: ${error}`, true);
-            return new Response(String(error), { status: 500 });
-          })
-          .build();
-
-        // The relay delivers each request with its original URL (including
-        // the SW-scope prefix and `~DEMO_SITE` service segment). Rewrite the
-        // URL to a site-relative form before dispatching so the builder's
-        // pattern matchers see plain paths like `/client/...` or `/api/...`.
-        const rewriteToSiteRelative = (request) => {
-          const relative = request.url.startsWith(siteBaseUrl)
-            ? request.url.substring(siteBaseUrl.length) || "/"
-            : new URL(request.url).pathname;
-          const url = `http://site.local${relative.startsWith("/") ? "" : "/"}${relative}`;
-          const init = {
-            method: request.method,
-            headers: request.headers,
-            body: request.method === "GET" || request.method === "HEAD" ? null : request.body,
-            duplex: "half",
-          };
-          return new Request(url, init);
-        };
-
-        await WebRunHttp.initHttpService(
-          (request) => siteHandler(rewriteToSiteRelative(request)),
-          { key: SERVICE_KEY, port: connection.port },
-        );
-        log(`Site mounted at ${siteBaseUrl}`);
-
-        // Embed the client.
-        const preview = document.querySelector("#preview");
-        preview.src = `${siteBaseUrl}/client/`;
-        log(`iframe → ${preview.src}`);
-      } catch (error) {
-        log(`Fatal: ${error}`, true);
-        console.error(error);
-      }
-    </script>
+    <script type="module" src="/src/main.js"></script>
   </body>
 </html>
