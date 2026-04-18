@@ -1,7 +1,10 @@
 import type { FilesApi } from "@statewalker/webrun-files";
 import { MemFilesApi } from "@statewalker/webrun-files-mem";
 import { SwHttpAdapter } from "@statewalker/webrun-http-browser/sw";
-import { SiteBuilder, type SiteHandler } from "@statewalker/webrun-site-builder";
+import {
+  SiteBuilder,
+  type SiteHandler,
+} from "@statewalker/webrun-site-builder";
 import { clientResources, serverResources } from "./site.js";
 
 const SITE_KEY = "demo";
@@ -21,7 +24,10 @@ function log(message: string, isError = false): void {
   logEl?.appendChild(p);
 }
 
-async function populate(files: FilesApi, entries: Record<string, string>): Promise<void> {
+async function populate(
+  files: FilesApi,
+  entries: Record<string, string>,
+): Promise<void> {
   for (const [path, content] of Object.entries(entries)) {
     await files.write(path, [new TextEncoder().encode(content)]);
   }
@@ -49,61 +55,44 @@ try {
   const site: SiteHandler = new SiteBuilder()
     .setFiles("/client", clientFiles)
     .setFiles("/server", serverFiles)
+    .setEndpoint("/api", async (request) => {
+      try {
+        const { default: handler } = await import(
+          /* @vite-ignore */ `${baseUrl}server/api/index.js`
+        );
+        return handler(request);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return new Response(message, { status: 500 });
+      }
+    })
     .setErrorHandler((error, request) => {
       log(`Error in ${request.method} ${request.url}: ${error}`, true);
       return new Response(String(error), { status: 500 });
     })
     .build();
 
-  const registration = await adapter.register(`${SITE_KEY}/`, async (request) => {
-    const relative = request.url.startsWith(baseUrl)
-      ? request.url.substring(baseUrl.length) || "/"
-      : new URL(request.url).pathname;
-    const siteUrl = `http://site.local${relative.startsWith("/") ? "" : "/"}${relative}`;
-    const init: RequestInit = {
-      method: request.method,
-      headers: request.headers,
-      body: request.method === "GET" || request.method === "HEAD" ? null : request.body,
-      // Allow streaming bodies on non-GET/HEAD; required by recent Fetch specs.
-      duplex: "half",
-    } as RequestInit & { duplex: "half" };
-    return site(new Request(siteUrl, init));
-  });
+  const registration = await adapter.register(
+    `${SITE_KEY}/`,
+    async (request) => {
+      const siteUrl = request.url.startsWith(baseUrl)
+        ? request.url.substring(baseUrl.length) || "/"
+        : new URL(request.url).pathname;
+      const init: RequestInit = {
+        method: request.method,
+        headers: request.headers,
+        body:
+          request.method === "GET" || request.method === "HEAD"
+            ? null
+            : request.body,
+        // Allow streaming bodies on non-GET/HEAD; required by recent Fetch specs.
+        duplex: "half",
+      } as RequestInit & { duplex: "half" };
+      return site(new Request(siteUrl, init));
+    },
+  );
   baseUrl = registration.baseUrl;
   log(`Site mounted at ${baseUrl}`);
-
-  // --- bootstrap the /api service via a hidden 1x1 _server.html iframe. ---
-  // `_server.html` sits next to index.html (served by Vite, not by the site);
-  // its sole script registers the /api service with its own SwHttpAdapter.
-  const serverFrame = document.createElement("iframe");
-  Object.assign(serverFrame.style, {
-    position: "fixed",
-    top: "-1000px",
-    left: "-1000px",
-    width: "1px",
-    height: "1px",
-    border: "none",
-    opacity: "0",
-  });
-
-  const apiReady = new Promise<void>((resolve, reject) => {
-    const onMessage = (event: MessageEvent) => {
-      if (event.source !== serverFrame.contentWindow) return;
-      if ((event.data as { type?: unknown })?.type !== "api-ready") return;
-      window.removeEventListener("message", onMessage);
-      resolve();
-    };
-    window.addEventListener("message", onMessage);
-    setTimeout(() => {
-      window.removeEventListener("message", onMessage);
-      reject(new Error("/_server.html did not report api-ready within 10s"));
-    }, 10_000);
-  });
-
-  serverFrame.src = new URL("/_server.html", location.href).toString();
-  document.body.appendChild(serverFrame);
-  await apiReady;
-  log("API service registered (key: api).");
 
   // --- now that /api is wired, show the client side of the hosted site. ---
   previewEl.src = `${baseUrl}client/`;

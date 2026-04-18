@@ -2,7 +2,7 @@
 //
 // - `clientResources` — HTML/CSS/JS served under the site's `/client` prefix.
 // - `serverResources` — server-side modules served under `/server`;
-//   `_server.html`'s adapter dynamic-imports them per `/api/*` request.
+//   the main site's `/api` endpoint dynamic-imports them per request.
 
 export const clientResources: Record<string, string> = {
   "/index.html": `<!doctype html>
@@ -13,9 +13,10 @@ export const clientResources: Record<string, string> = {
 </head><body>
   <h2>Hosted in-browser site</h2>
   <p>Served from an in-memory <code>FilesApi</code> via a same-origin
-  ServiceWorker and <code>SiteBuilder</code>. Every fetch below goes
-  through the SW to the sibling <code>_server.html</code> iframe that
-  dynamically imports <code>/demo/server/api/index.js</code>.</p>
+  ServiceWorker and <code>SiteBuilder</code>. The form below fetches
+  <code>/demo/api?name=…</code>; the endpoint dynamically imports
+  <code>/demo/server/api/index.js</code> and delegates to its default
+  export.</p>
   <label>Name: <input id="name" value="World"></label>
   <pre id="out">…</pre>
   <script type="module" src="./main.js"></script>
@@ -27,9 +28,8 @@ pre { background: #f4f4f5; padding: 0.5rem; border-radius: 0.25rem; }`,
   "/main.js": `const input = document.querySelector("#name");
 const out = document.querySelector("#out");
 async function refresh() {
-  // The API lives at the site origin under /api/* (key "api"), registered
-  // by the sibling _server.html iframe — absolute path, bypasses /demo/.
-  const response = await fetch("/api/greet?name=" + encodeURIComponent(input.value));
+  // Client is hosted at /demo/client/, API at /demo/api — one level up.
+  const response = await fetch("../api?name=" + encodeURIComponent(input.value));
   out.textContent = JSON.stringify(await response.json(), null, 2);
 }
 input.addEventListener("input", refresh);
