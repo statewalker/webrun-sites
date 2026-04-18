@@ -173,7 +173,8 @@ this fixed order:
 3. **Files** — registered prefixes are checked in order; first prefix
    that is a real prefix of the URL path wins. The sub-path under the
    prefix is passed to the `FilesApi`. A sub-path that resolves to a
-   directory falls back to `directoryIndex` (default: `index.html`).
+   directory returns `404` unless `directoryIndex` is explicitly
+   configured (e.g. `{ directoryIndex: "index.html" }`).
 4. **Fallback** — `404 Not Found`.
 
 Any uncaught throw in any layer is routed to the error handler.
@@ -191,8 +192,9 @@ Any uncaught throw in any layer is routed to the error handler.
   `FilesApi.read({start, length})`. Suffix (`-N`) and open-ended
   (`N-`) forms are supported. Multi-range is rejected with `416`.
 - Other methods return `405 Method Not Allowed` with `Allow: GET, HEAD`.
-- A directory path falls back to `<path>/<directoryIndex>` if it
-  exists; otherwise `404`.
+- Directory paths return `404` by default. Opt into the conventional
+  static-site fallback with `{ directoryIndex: "index.html" }`; if set
+  but the index is missing the response is still `404`.
 
 ### URL patterns
 
@@ -241,9 +243,10 @@ verb.
 - **URLPattern required.** Node 18+ and all modern browsers ship
   it. For older Node, pre-load `urlpattern-polyfill` before
   importing this package.
-- **No directory listings.** A request for a directory that lacks
-  `index.html` returns `404`, not an HTML file listing. Add one
-  yourself with a `setEndpoint("/browse/*", …)` if you need it.
+- **Exact-path file serving.** A request whose resolved path is a
+  directory returns `404` unless you opt in to a `directoryIndex`.
+  No HTML file listings either; add a `setEndpoint("/browse/*", …)`
+  if you need them.
 - **No ETag / conditional GET.** `Last-Modified` and `If-None-Match`
   aren't produced — caching relies on `Content-Length` + fresh
   fetches. Add a custom endpoint layer if you need full cache

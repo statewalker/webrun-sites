@@ -4,19 +4,25 @@ import { getMimeType } from "./mime.js";
 export interface ServeFilesOptions {
   /** Custom extension → Content-Type resolver. Defaults to {@link getMimeType}. */
   getMimeType?: (path: string) => string;
-  /** File served when the target path resolves to a directory. Defaults to `"index.html"`. */
+  /**
+   * Optional file name served when the target path resolves to a directory.
+   * **No default** — without this option set, a request for a directory
+   * (e.g. `/client/`) returns `404`, not its `index.html`. Opt in with
+   * `"index.html"` to get the conventional static-site behaviour.
+   */
   directoryIndex?: string;
 }
 
 /**
  * Build a `(Request, path) ⇒ Response` function that serves `path` from
  * `filesApi`. Handles `GET` / `HEAD`, sets `Content-Type` / `Content-Length`,
- * honours `Range: bytes=<start>-<end>` for partial content, and falls back
- * to a directory index when a path resolves to a folder.
+ * honours `Range: bytes=<start>-<end>` for partial content. Only serves
+ * exact-match file paths — directory URLs return `404` unless
+ * `directoryIndex` is explicitly set.
  */
 export function newServeFiles(
   filesApi: FilesApi,
-  { getMimeType: resolveMime = getMimeType, directoryIndex = "index.html" }: ServeFilesOptions = {},
+  { getMimeType: resolveMime = getMimeType, directoryIndex }: ServeFilesOptions = {},
 ): (request: Request, path: string) => Promise<Response> {
   return async (request: Request, path: string): Promise<Response> => {
     const method = request.method.toUpperCase();
@@ -68,12 +74,13 @@ export function newServeFiles(
 async function resolvePath(
   filesApi: FilesApi,
   path: string,
-  directoryIndex: string,
+  directoryIndex: string | undefined,
 ): Promise<{ path: string; size: number | undefined } | null> {
   const stats = await filesApi.stats(path);
   if (!stats) return null;
   if (stats.kind === "file") return { path, size: stats.size };
-  // Directory → fall back to index file.
+  if (!directoryIndex) return null;
+  // Directory → fall back to the configured index file.
   const indexPath = path.endsWith("/") ? `${path}${directoryIndex}` : `${path}/${directoryIndex}`;
   const indexStats = await filesApi.stats(indexPath);
   if (indexStats?.kind === "file") return { path: indexPath, size: indexStats.size };

@@ -32,7 +32,9 @@ try {
     .build();
   log(`Site mounted at ${site.baseUrl}`);
 
-  previewEl.src = `${site.baseUrl}client/`;
+  // Full path, not a directory URL — SiteBuilder only serves exact-match
+  // files unless `directoryIndex` is explicitly configured.
+  previewEl.src = `${site.baseUrl}client/index.html`;
   log(`iframe → ${previewEl.src}`);
 } catch (error) {
   log(`Fatal: ${error instanceof Error ? error.message : String(error)}`, true);

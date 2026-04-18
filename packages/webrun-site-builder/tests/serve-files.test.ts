@@ -35,25 +35,35 @@ describe("newServeFiles", () => {
     expect(response.status).toBe(404);
   });
 
-  it("serves directoryIndex when the path resolves to a folder", async () => {
+  it("returns 404 for a directory path when directoryIndex is not set (default)", async () => {
     await populate(api, { "/site/index.html": "<p>home</p>" });
     const serve = newServeFiles(api);
+    const response = await serve(new Request("http://x/"), "/site");
+    expect(response.status).toBe(404);
+    // The file itself is still reachable by its full path.
+    const direct = await serve(new Request("http://x/"), "/site/index.html");
+    expect(await direct.text()).toBe("<p>home</p>");
+  });
+
+  it("serves the configured directoryIndex when opted in", async () => {
+    await populate(api, { "/site/index.html": "<p>home</p>" });
+    const serve = newServeFiles(api, { directoryIndex: "index.html" });
     const response = await serve(new Request("http://x/"), "/site");
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
     expect(await response.text()).toBe("<p>home</p>");
   });
 
-  it("honours a custom directoryIndex", async () => {
+  it("honours a custom directoryIndex name", async () => {
     await populate(api, { "/d/start.html": "<p>start</p>" });
     const serve = newServeFiles(api, { directoryIndex: "start.html" });
     const response = await serve(new Request("http://x/"), "/d");
     expect(await response.text()).toBe("<p>start</p>");
   });
 
-  it("returns 404 for a directory with no index", async () => {
+  it("returns 404 when directoryIndex is set but the index file is missing", async () => {
     await populate(api, { "/empty/other.txt": "hi" });
-    const serve = newServeFiles(api);
+    const serve = newServeFiles(api, { directoryIndex: "index.html" });
     const response = await serve(new Request("http://x/"), "/empty");
     expect(response.status).toBe(404);
   });
