@@ -15,12 +15,19 @@ const site = await new HostedSiteBuilder()
   .setServerRunner("/api", "/server/api/index.js")
   .build();
 
-iframe.src = `${site.baseUrl}client/`;
+iframe.src = `${site.baseUrl}client/index.html`;
 ```
 
 That's the whole demo. The `/sw-worker.js` registration, `await
 adapter.start()`, SW-scope URL rewrites, and dynamic-import scaffold
 for `/api` all happen inside `.build()`.
+
+A runnable version lives at
+[`apps/site-builder-demo`](../../apps/site-builder-demo) — a Vite +
+TypeScript app that stands up an in-browser site (static client, `/api`
+endpoint, iframe preview) from a single `HostedSiteBuilder` call. Open
+its [README](../../apps/site-builder-demo/README.md) for the full
+architecture diagram and walkthrough.
 
 ## Why it exists
 

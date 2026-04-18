@@ -1,45 +1,172 @@
 # site-builder-demo
 
-A Vite + TypeScript app that shows a hosted client side of a
-`SiteBuilder`-composed site running behind a same-origin
-`@statewalker/webrun-http-browser` ServiceWorker.
+A **Vite + TypeScript** app that stands up a full in-browser HTTP site —
+static client assets, dynamic API, server-side module, iframe preview —
+from a single
+[`HostedSiteBuilder`](../../packages/webrun-site-host) call. No backend,
+no disk, no bundler magic beyond what Vite ships with.
 
-## Layout
+Open [http://localhost:5173/](http://localhost:5173/) after
+`pnpm run dev` to see the demo live. The page registers a
+ServiceWorker, mounts the site, and embeds the hosted
+`client/index.html` in an iframe. The iframe's JavaScript calls an API
+endpoint served from the same site — the response comes from a
+JavaScript module that's never written to disk, evaluated by the
+browser's native `import()`.
 
-- [`@statewalker/webrun-site-builder`](../../packages/webrun-site-builder) composes the `(Request) ⇒ Response` handler.
-- [`@statewalker/webrun-http-browser/sw`](../../packages/webrun-http-browser) (`SwHttpAdapter`) registers the handler with a same-origin SW so same-origin `fetch()` calls hit it.
-- [`@statewalker/webrun-files-mem`](https://www.npmjs.com/package/@statewalker/webrun-files-mem) backs both `client/` (the hosted page + stylesheet) and `server/` (a placeholder module for a future dynamic endpoint — declared in the site but not wired up yet).
+## What the demo shows
 
-## What happens
+1. **An in-browser ServiceWorker turning `fetch()` into application code.**
+   Any `fetch()` inside the iframe hits the SW, which dispatches to a
+   `SiteBuilder`-composed handler running in the outer page.
+2. **A single fluent builder call does everything.** `HostedSiteBuilder`
+   (from `@statewalker/webrun-site-host`) wraps `SiteBuilder` + the
+   ServiceWorker adapter — it generates the site key, starts the SW,
+   composes the routes, rewrites SW-scope URLs to site-local URLs, and
+   returns a `HostedSite { siteKey, baseUrl, stop }` handle.
+3. **Static files live in memory.** The hosted `client/index.html`,
+   `style.css`, `main.js`, and the server-side `api/index.js` all come
+   from two `MemFilesApi` instances built from plain `Record<string,
+   string>` maps in [`src/site.ts`](./src/site.ts). No files on disk.
+4. **The `/api` endpoint is a `.js` module served by the same site.**
+   `setServerRunner("/api", "/server/api/index.js")` tells the builder
+   to generate an endpoint whose handler dynamically `import()`s that
+   URL through the same ServiceWorker, evaluates the returned JS as a
+   module, and delegates to its `default` export. Edit the module
+   content and the next request picks it up (modulo browser module
+   cache).
+5. **Strict 404 semantics.** `/demo/client/` by itself (trailing slash
+   only, no filename) returns `404` — the site only serves exact-match
+   paths. The iframe therefore uses the full
+   `${baseUrl}client/index.html`.
 
-1. The page registers `/sw/sw-worker.js` (copied out of `webrun-http-browser/dist/` by `vite-plugin-static-copy`) via `SwHttpAdapter`. Scope is `/sw/` — only requests under that path are intercepted by the SW, so Vite's own HMR and asset URLs are untouched.
-2. Two `MemFilesApi` instances are populated: `clientFiles` (`index.html`, `style.css`) and `serverFiles` (placeholder `api/index.js`).
-3. `SiteBuilder` mounts `clientFiles` under `/client` and `serverFiles` under `/server`, with a default `setErrorHandler` that pipes failures into the on-page log.
-4. The handler is registered at `demo/` on the adapter, yielding `baseUrl = /sw/demo/`. The registration wrapper rewrites each incoming `request.url` from the SW form (`/sw/demo/...`) to a site-local form (`http://site.local/...`) so the builder's pattern matchers see plain `/client/*` paths.
-5. The iframe on the page is pointed at `${baseUrl}client/` — the SW intercepts every fetch inside it and routes to the site handler.
+## Why it's interesting
+
+- **Backendless web apps.** The same URL shape a normal deployed site
+  would use (`/api?name=…`, `/client/index.html`) works fully inside a
+  single tab. Great for demos, offline-first apps, tutorials, Observable
+  embeds, or unit testing a client against its API without any server.
+- **Swap the `FilesApi` for disk, OPFS, or S3.** `MemFilesApi` is just
+  one of many `@statewalker/webrun-files` implementations. Swap in
+  `BrowserFilesApi` (File System Access API) and you get a hosted site
+  backed by a folder the user picked; swap in `S3FilesApi` and you get
+  an in-browser CDN front-end. The builder API is unchanged.
+- **The server module comes from the site itself.** This inversion is
+  surprising the first time you see it: your API handler is a JS file
+  served over HTTP (by the same handler that's serving everything
+  else), `import()`-ed at request time, and evaluated in the browser.
+  That means the "server" can be edited live, shipped as a static
+  asset, or generated by a build step — and the page infrastructure
+  never changes.
+- **Everything fits in ~40 lines of TypeScript.** See
+  [`src/main.ts`](./src/main.ts). Swapping the JSON response, the
+  URL layout, the auth scheme, or the file backend is a one-line
+  change.
+
+## How it fits together
+
+```
+┌────────────────────────────── outer page (/)
+│  main.ts ──▶ new HostedSiteBuilder().build()
+│              │   register SW, compose SiteBuilder, mount under /demo/
+│              │
+│              ▼
+│          HostedSite { siteKey: "demo", baseUrl: "…/demo/", stop }
+│
+│  <iframe src="{baseUrl}client/index.html">
+│    ┌──────────────── iframe (same-origin SW intercepts fetches)
+│    │  main.js ──▶ fetch("../api?name=World")
+│    │             │
+│    │             ▼  fetch routed through SW …
+│    │         [SW]  SwHttpDispatcher sees key="demo" → forwards to
+│    │               the outer page's registered handler via MessagePort
+│    │               │
+│    │               ▼
+│    │           [outer page]  SiteBuilder: /api endpoint matches
+│    │               │   setServerRunner("/api", "/server/api/index.js")
+│    │               │   dynamically import("${baseUrl}server/api/index.js")
+│    │               │     → that URL ALSO goes through the SW, serves the
+│    │               │        MemFilesApi-backed JS module as text/javascript
+│    │               │     → browser evaluates → module.default(request)
+│    │               │
+│    │               ▼
+│    │           Response JSON flows back through the SW to the iframe
+│    │
+│    └────────── iframe renders the parsed JSON into <pre id="out">
+└──────────────
+```
+
+## File layout
+
+```
+apps/site-builder-demo/
+├── index.html              — the outer page (Vite entry)
+├── src/
+│   ├── main.ts             — HostedSiteBuilder call + iframe wiring
+│   └── site.ts             — clientResources + serverResources (plain strings)
+├── vite.config.js          — copies the SW runtime to /sw-worker.js
+├── tsconfig.json           — TypeScript config (tsc --noEmit)
+└── package.json            — deps + scripts
+```
+
+The only static asset copied into the dev/build output is the pre-built
+ServiceWorker runtime (`node_modules/@statewalker/webrun-http-browser/dist/sw-worker.js`),
+placed at `/sw-worker.js` by `vite-plugin-static-copy`. Its default
+scope is `/`, which means the outer page sits under SW control (a
+requirement for `SwHttpAdapter.start()` to resolve).
 
 ## Run it
 
 ```sh
-pnpm install            # at the workspace root
-pnpm run dev            # vite dev server on :5173
-# or, a production build:
-pnpm run build
-pnpm run preview
-# type-checking without emitting:
-pnpm run typecheck
+pnpm install         # once, from the workspace root
+pnpm run dev         # vite dev server on :5173
+pnpm run typecheck   # tsc --noEmit
+pnpm run build       # vite build → dist/
+pnpm run preview     # vite preview on :5173
 ```
 
-Open [http://localhost:5173/](http://localhost:5173/).
+Open [http://localhost:5173/](http://localhost:5173/). Watch the right
+panel — it logs `Site mounted at …/demo/` and the iframe source. The
+iframe shows the hosted client; typing into its input fires
+`fetch("../api?name=…")` and renders the server module's JSON reply.
 
-## What to watch for
+## What to verify
 
-- The right panel logs each step (SW activated, site mounted, iframe source).
-- The iframe shows the hosted client page — served entirely from in-memory `MemFilesApi` content through the SW.
-- No network traffic for the iframe content (check the DevTools network panel: every request shows `from ServiceWorker`).
+Open the browser DevTools on the preview page:
 
-## Why it's set up this way
+- **Network tab, iframe fetches**: every request shows `from
+  ServiceWorker` — no traffic hits Vite's preview server for
+  `/demo/*`.
+- **Application tab → Service Workers**: `/sw-worker.js` is activated
+  and controls the page.
+- **Strict URL matching**:
+  - `fetch("/demo/client/index.html")` → 200, HTML content.
+  - `fetch("/demo/client/")` → 404 (trailing-slash directory URL has no
+    index fallback by default).
+  - `fetch("/demo/client/nope.html")` → 404.
+  - `fetch("/demo/api?name=Ada")` → 200, JSON.
 
-- **TypeScript** gives the app-side code the same typing story as the packages it consumes. `tsc --noEmit` catches issues Vite's esbuild silently transpiles past.
-- **Scope under `/sw/`** keeps the demo self-contained and avoids the SW intercepting Vite's dev-server URLs.
-- **Server files declared but not wired** keeps the structure ready for a dynamic `setEndpoint` that imports from `serverFiles` — the mount point exists; the handler will be added in a follow-up change.
+## Things to try
+
+- Swap `MemFilesApi` records for a `BrowserFilesApi` hooked up to
+  `window.showDirectoryPicker()` — hosted-site backed by a real folder.
+- Edit the server module (`serverResources["/api/index.js"]` in
+  `site.ts`) to do something interactive: session state, streaming,
+  WebSocket fan-out, whatever.
+- Add `.setAuth("/admin/*", newBasicAuth({...}))` on the builder and
+  a new handler at `/admin/` — the demo becomes a mini admin console.
+- Register a second `HostedSiteBuilder` with a different site key. Both
+  sites share the same SW; their URLs don't collide.
+
+## Relationship to the other demos
+
+| Demo | Location | Pattern |
+| --- | --- | --- |
+| **This one** | `apps/site-builder-demo` | Same-origin SW + `HostedSiteBuilder` + dynamic-imported server module |
+| Hono dynamic site | [`packages/webrun-http-browser/demo/demo-1.html`](../../packages/webrun-http-browser/demo/demo-1.html) | Relay SW + Hono router as the handler |
+| FSAA file server | [`packages/webrun-http-browser/demo/demo-2.html`](../../packages/webrun-http-browser/demo/demo-2.html) | Relay SW + File System Access API folder |
+| Minimal same-origin | [`packages/webrun-http-browser/public/index.html`](../../packages/webrun-http-browser/public/index.html) | Bare `SwHttpAdapter` call, no `SiteBuilder` |
+
+Compared to those, this app demonstrates the **highest-level** wrapping
+(`HostedSiteBuilder`) and the **dynamic-import server module** pattern
+— the other demos use manual handler functions.
