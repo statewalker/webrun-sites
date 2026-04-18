@@ -135,14 +135,46 @@ describe("HostedSiteBuilder", () => {
     expect(getAdapter().handler).toBeDefined();
   });
 
-  it("HostedSite.stop() removes the registration from the adapter", async () => {
+  it("HostedSite.stop() removes the registration AND stops the adapter", async () => {
     const { builder, getAdapter } = newBuilder();
     builder.setEndpoint("/ping", () => new Response("pong"));
     const site = await builder.build();
     expect(getAdapter().handler).toBeDefined();
+    expect(getAdapter().handlerRemoved).toBe(false);
+    expect(getAdapter().stopped).toBe(false);
     await site.stop();
     expect(getAdapter().handler).toBeUndefined();
+    expect(getAdapter().handlerRemoved).toBe(true);
     expect(getAdapter().stopped).toBe(true);
+  });
+
+  it("HostedSite.stop() tolerates adapters without a stop() method", async () => {
+    // A minimal adapter that satisfies the required interface only.
+    class MinimalAdapter implements SiteAdapter {
+      removed = false;
+      async start(): Promise<void> {}
+      async register(prefix: string, handler: (request: Request) => Promise<Response>) {
+        void handler;
+        return {
+          baseUrl: `http://minimal/${prefix.replace(/^[./]+/, "")}`,
+          remove: async () => {
+            this.removed = true;
+          },
+        };
+      }
+    }
+    let captured: MinimalAdapter | undefined;
+    const site = await new HostedSiteBuilder({
+      adapterFactory: () => {
+        captured = new MinimalAdapter();
+        return captured;
+      },
+    })
+      .setSiteKey("k")
+      .setEndpoint("/ping", () => new Response("pong"))
+      .build();
+    await expect(site.stop()).resolves.toBeUndefined();
+    expect(captured?.removed).toBe(true);
   });
 
   it("calls the adapter factory with the resolved key + swUrl", async () => {

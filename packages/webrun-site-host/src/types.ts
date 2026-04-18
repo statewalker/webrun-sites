@@ -15,7 +15,11 @@ export interface HostedSite {
   readonly siteKey: string;
   /** Absolute site base URL, e.g. `http://localhost:5173/demo/`. */
   readonly baseUrl: string;
-  /** Remove the handler from the adapter's routing table. Idempotent. */
+  /**
+   * Remove the handler from the adapter's routing table and tear down the
+   * adapter (if it exposes a `stop()` method). Symmetric counterpart to
+   * `.build()`: after `stop()`, the site is fully detached.
+   */
   stop(): Promise<void>;
 }
 
@@ -30,6 +34,12 @@ export interface SiteAdapter {
     prefix: string,
     handler: (request: Request) => Promise<Response>,
   ): Promise<SiteAdapterRegistration>;
+  /**
+   * Optional teardown hook. `HostedSite.stop()` calls this after
+   * `registration.remove()` so the adapter's own resources (SW listeners,
+   * IndexedDB bookkeeping, …) are released.
+   */
+  stop?(): Promise<void>;
 }
 
 export interface SiteAdapterRegistration {

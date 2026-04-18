@@ -4,11 +4,17 @@ import type { SiteAdapter, SiteAdapterRegistration } from "../src/types.js";
  * In-memory `SiteAdapter` for tests. Captures the registered handler + key
  * so tests can invoke it directly and assert on the response without
  * touching the ServiceWorker API.
+ *
+ * Tracks three lifecycle flags:
+ * - `started` — set by `start()`
+ * - `handlerRemoved` — set by `registration.remove()` (first half of site.stop())
+ * - `stopped` — set by `stop()` (second half of site.stop(), via adapter.stop())
  */
 export class FakeAdapter implements SiteAdapter {
   static readonly ORIGIN = "http://fake.local";
 
   started = false;
+  handlerRemoved = false;
   stopped = false;
   key?: string;
   handler?: (request: Request) => Promise<Response>;
@@ -32,9 +38,13 @@ export class FakeAdapter implements SiteAdapter {
       baseUrl,
       remove: async () => {
         this.handler = undefined;
-        this.stopped = true;
+        this.handlerRemoved = true;
       },
     };
+  }
+
+  async stop(): Promise<void> {
+    this.stopped = true;
   }
 
   /** Convenience: build a full URL under this adapter's baseUrl. */

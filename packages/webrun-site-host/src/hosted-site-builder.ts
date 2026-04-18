@@ -176,7 +176,12 @@ export class HostedSiteBuilder {
     return {
       siteKey,
       baseUrl,
-      stop: () => registration.remove(),
+      stop: async () => {
+        // Detach the handler first so any in-flight request can still see
+        // the adapter's bookkeeping, then tear down the adapter itself.
+        await registration.remove();
+        await adapter.stop?.();
+      },
     };
   }
 
