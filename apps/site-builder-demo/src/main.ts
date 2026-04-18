@@ -3,7 +3,7 @@ import { MemFilesApi } from "@statewalker/webrun-files-mem";
 import { SwHttpAdapter } from "@statewalker/webrun-http-browser/sw";
 import { SiteBuilder, type SiteHandler } from "@statewalker/webrun-site-builder";
 
-const SERVICE_KEY = "demo";
+const SITE_KEY = "demo";
 // Serve the SW from the site root so its default scope (`/`) covers the
 // outer page too — `SwHttpAdapter.start()` waits for the page to be
 // controlled, which only happens when the page URL is within the SW scope.
@@ -40,28 +40,46 @@ try {
 </head><body>
   <h2>Hosted in-browser site</h2>
   <p>Served from an in-memory <code>FilesApi</code> via a same-origin
-  ServiceWorker and <code>SiteBuilder</code>.</p>
+  ServiceWorker and <code>SiteBuilder</code>. Every fetch below goes
+  through the SW to the sibling <code>_server.html</code> iframe that
+  dynamically imports <code>/demo/server/api/index.js</code>.</p>
+  <label>Name: <input id="name" value="World"></label>
+  <pre id="out">…</pre>
+  <script type="module" src="./main.js"></script>
 </body></html>`,
     "/style.css": `body { font-family: system-ui, sans-serif; margin: 1rem; }
 h2 { color: navy; }
-code { background: #f4f4f5; padding: 0 0.25rem; border-radius: 0.2rem; }`,
+code { background: #f4f4f5; padding: 0 0.25rem; border-radius: 0.2rem; }
+pre { background: #f4f4f5; padding: 0.5rem; border-radius: 0.25rem; }`,
+    "/main.js": `const input = document.querySelector("#name");
+const out = document.querySelector("#out");
+async function refresh() {
+  // The API lives at the site origin under /api/* (key "api"), registered
+  // by the sibling _server.html iframe — absolute path, bypasses /demo/.
+  const response = await fetch("/api/greet?name=" + encodeURIComponent(input.value));
+  out.textContent = JSON.stringify(await response.json(), null, 2);
+}
+input.addEventListener("input", refresh);
+refresh();`,
   });
 
-  // --- server/ — declared in the site but not wired to any endpoint yet. ---
+  // --- server/ — dynamically-imported handler module. ---
   const serverFiles = new MemFilesApi();
   await populate(serverFiles, {
-    "/api/index.js": `// Placeholder server module for a future dynamic endpoint.
-export default async function handleRequest(request) {
+    "/api/index.js": `export default async function handleRequest(request) {
+  const url = new URL(request.url);
+  const name = url.searchParams.get("name") ?? "anonymous";
   return Response.json({
-    message: "Hello from the future server!",
-    at: new URL(request.url).pathname,
+    message: "Hello from the dynamically-imported server, " + name + "!",
+    at: url.pathname,
+    now: new Date().toISOString(),
   });
 }`,
   });
 
   // --- register a same-origin ServiceWorker and mount the site. ---
   const adapter = new SwHttpAdapter({
-    key: SERVICE_KEY,
+    key: SITE_KEY,
     serviceWorkerUrl: SW_URL,
   });
   await adapter.start();
@@ -78,7 +96,7 @@ export default async function handleRequest(request) {
     })
     .build();
 
-  const registration = await adapter.register(`${SERVICE_KEY}/`, async (request) => {
+  const registration = await adapter.register(`${SITE_KEY}/`, async (request) => {
     const relative = request.url.startsWith(baseUrl)
       ? request.url.substring(baseUrl.length) || "/"
       : new URL(request.url).pathname;
@@ -95,7 +113,40 @@ export default async function handleRequest(request) {
   baseUrl = registration.baseUrl;
   log(`Site mounted at ${baseUrl}`);
 
-  // --- iframe shows the client side of the hosted site. ---
+  // --- bootstrap the /api service via a hidden 1x1 _server.html iframe. ---
+  // `_server.html` sits next to index.html (served by Vite, not by the site);
+  // its sole script registers the /api service with its own SwHttpAdapter.
+  const serverFrame = document.createElement("iframe");
+  Object.assign(serverFrame.style, {
+    position: "fixed",
+    top: "-1000px",
+    left: "-1000px",
+    width: "1px",
+    height: "1px",
+    border: "none",
+    opacity: "0",
+  });
+
+  const apiReady = new Promise<void>((resolve, reject) => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.source !== serverFrame.contentWindow) return;
+      if ((event.data as { type?: unknown })?.type !== "api-ready") return;
+      window.removeEventListener("message", onMessage);
+      resolve();
+    };
+    window.addEventListener("message", onMessage);
+    setTimeout(() => {
+      window.removeEventListener("message", onMessage);
+      reject(new Error("/_server.html did not report api-ready within 10s"));
+    }, 10_000);
+  });
+
+  serverFrame.src = new URL("/_server.html", location.href).toString();
+  document.body.appendChild(serverFrame);
+  await apiReady;
+  log("API service registered (key: api).");
+
+  // --- now that /api is wired, show the client side of the hosted site. ---
   previewEl.src = `${baseUrl}client/`;
   log(`iframe → ${previewEl.src}`);
 } catch (error) {
