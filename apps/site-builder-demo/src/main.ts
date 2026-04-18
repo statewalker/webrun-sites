@@ -2,6 +2,7 @@ import type { FilesApi } from "@statewalker/webrun-files";
 import { MemFilesApi } from "@statewalker/webrun-files-mem";
 import { SwHttpAdapter } from "@statewalker/webrun-http-browser/sw";
 import { SiteBuilder, type SiteHandler } from "@statewalker/webrun-site-builder";
+import { clientResources, serverResources } from "./site.js";
 
 const SITE_KEY = "demo";
 // Serve the SW from the site root so its default scope (`/`) covers the
@@ -29,53 +30,11 @@ async function populate(files: FilesApi, entries: Record<string, string>): Promi
 try {
   logEl.innerHTML = "";
 
-  // --- client/ — HTML + CSS + JS served by the site. ---
+  // --- client/ + server/ — file contents live in ./site.ts ---
   const clientFiles = new MemFilesApi();
-  await populate(clientFiles, {
-    "/index.html": `<!doctype html>
-<html><head>
-  <meta charset="utf-8">
-  <title>Hosted client</title>
-  <link rel="stylesheet" href="./style.css">
-</head><body>
-  <h2>Hosted in-browser site</h2>
-  <p>Served from an in-memory <code>FilesApi</code> via a same-origin
-  ServiceWorker and <code>SiteBuilder</code>. Every fetch below goes
-  through the SW to the sibling <code>_server.html</code> iframe that
-  dynamically imports <code>/demo/server/api/index.js</code>.</p>
-  <label>Name: <input id="name" value="World"></label>
-  <pre id="out">…</pre>
-  <script type="module" src="./main.js"></script>
-</body></html>`,
-    "/style.css": `body { font-family: system-ui, sans-serif; margin: 1rem; }
-h2 { color: navy; }
-code { background: #f4f4f5; padding: 0 0.25rem; border-radius: 0.2rem; }
-pre { background: #f4f4f5; padding: 0.5rem; border-radius: 0.25rem; }`,
-    "/main.js": `const input = document.querySelector("#name");
-const out = document.querySelector("#out");
-async function refresh() {
-  // The API lives at the site origin under /api/* (key "api"), registered
-  // by the sibling _server.html iframe — absolute path, bypasses /demo/.
-  const response = await fetch("/api/greet?name=" + encodeURIComponent(input.value));
-  out.textContent = JSON.stringify(await response.json(), null, 2);
-}
-input.addEventListener("input", refresh);
-refresh();`,
-  });
-
-  // --- server/ — dynamically-imported handler module. ---
+  await populate(clientFiles, clientResources);
   const serverFiles = new MemFilesApi();
-  await populate(serverFiles, {
-    "/api/index.js": `export default async function handleRequest(request) {
-  const url = new URL(request.url);
-  const name = url.searchParams.get("name") ?? "anonymous";
-  return Response.json({
-    message: "Hello from the dynamically-imported server, " + name + "!",
-    at: url.pathname,
-    now: new Date().toISOString(),
-  });
-}`,
-  });
+  await populate(serverFiles, serverResources);
 
   // --- register a same-origin ServiceWorker and mount the site. ---
   const adapter = new SwHttpAdapter({
