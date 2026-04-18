@@ -19,23 +19,20 @@
     </style>
   </head>
   <body>
-    <h1>Composed site: files + dynamic API + dynamic import</h1>
+    <h1>SiteBuilder demo — same-origin ServiceWorker</h1>
     <p>
       A <code>SiteBuilder</code> mounts two <code>MemFilesApi</code>
-      instances — one for the client (HTML/JS/CSS), one for the server —
-      plus a dynamic <code>/api/*</code> endpoint. The endpoint handler
-      fetches <code>server/api/index.js</code> through the same service
-      via <code>callHttpService</code>, wraps the response in a
-      <code>blob:</code> URL, and <code>import()</code>s it to invoke
-      its default export per request. Client fetches go through the
-      relay ServiceWorker exactly like a normal HTTP site.
+      instances — one for the client (HTML/CSS), one for the server
+      (placeholder, not wired) — then registers the composed handler
+      under a same-origin <code>SwHttpAdapter</code>. The iframe shows
+      the hosted client side of the site.
     </p>
 
     <div class="panel">
-      <iframe title="Hosted site" id="preview"></iframe>
+      <iframe title="Hosted client" id="preview"></iframe>
       <div class="log" id="log"><p>Loading…</p></div>
     </div>
 
-    <script type="module" src="/src/main.js"></script>
+    <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

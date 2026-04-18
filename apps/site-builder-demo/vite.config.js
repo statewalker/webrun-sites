@@ -2,37 +2,29 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import { viteStaticCopy } from "vite-plugin-static-copy";
 
-// The relay mode needs the ServiceWorker + its HTML shim to live at a stable
-// URL on the site origin. Copy `@statewalker/webrun-http-browser`'s
-// `public-relay/` out of node_modules into the dev/build output as
-// `/public-relay/`. Resolve via node_modules so pnpm's symlinks work.
-const packageRoot = fileURLToPath(
-  new URL("./node_modules/@statewalker/webrun-http-browser/", import.meta.url),
+// Same-origin ServiceWorker mode (no relay): copy webrun-http-browser's
+// pre-built SW runtime to `/sw-worker.js` at the site root. Its default
+// scope is the site root (`/`), so the outer page sits under SW control —
+// required by `SwHttpAdapter.start()` which waits for the controller.
+const swRuntime = fileURLToPath(
+  new URL("./node_modules/@statewalker/webrun-http-browser/dist/sw-worker.js", import.meta.url),
 );
 
 export default defineConfig({
   plugins: [
     viteStaticCopy({
-      targets: [
-        // `relay.html` and `relay-sw.js` both reference sibling files at
-        // `../dist/index.js` and `../dist/relay-sw.js`. Copy both folders
-        // out of node_modules so the paths resolve at runtime.
-        { src: `${packageRoot}public-relay/*`, dest: "public-relay" },
-        { src: `${packageRoot}dist/index.js`, dest: "dist" },
-        { src: `${packageRoot}dist/relay-sw.js`, dest: "dist" },
-      ],
+      targets: [{ src: swRuntime, dest: "." }],
     }),
   ],
   build: {
-    // We use top-level await in src/main.js; modern target lets esbuild keep it.
+    // src/main.ts uses top-level await; modern target lets esbuild keep it.
     target: "esnext",
   },
   server: {
     port: 5173,
     fs: {
-      // pnpm links webrun-http-browser into a workspace-local node_modules
-      // symlink. Vite's default fs guard restricts reads to the project root;
-      // allow the workspace root so the relay package is visible.
+      // pnpm symlinks webrun-http-browser; allow the workspace root so the
+      // pre-built SW runtime is readable.
       allow: [fileURLToPath(new URL("../../", import.meta.url))],
     },
   },
