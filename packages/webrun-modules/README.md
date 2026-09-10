@@ -593,6 +593,41 @@ target is `local`, `host`, or `cdn`, with the proxy resolving the binding:
   into `cdn`/`inline` — swapping it changes only the generated proxy bodies, the
   module's own imports never change.
 
+## Packages with peer dependencies
+
+A package's `peerDependencies` are its **consumer's** to supply. Every module root
+has one `~deps/` of static proxy files, so it can bind only one version per peer.
+A package with peers is therefore served once per distinct resolution of them —
+a **peer-qualified instance** — under a root that carries the resolution in its
+version segment:
+
+```
+/@napi-rs/wasm-runtime@1.2.4_p.3f0c…e1/runtime.js    ← reached from a consumer pinning @emnapi/core 1.11.2
+/@napi-rs/wasm-runtime@1.2.4_p.9a41…07/runtime.js    ← reached from a consumer pinning @emnapi/core 2.0.0-alpha.4
+```
+
+Each instance has its own `~deps/`, and each binds the peer its consumer declared.
+Both instances share the one set of raw files.
+
+- **A peer is pinned from the consumer.** That is the importing package's
+  `dependencies`, `peerDependencies` or `optionalDependencies` entry for it, or the
+  importer's own pin when the importer is itself an instance, so pins propagate
+  along chains. The consumer's declaration wins even outside the target's peer
+  range. Only when the consumer declares nothing does the target's own peer range
+  decide.
+- **Not pinned:** host-provided names (they bind to the `provided` instance
+  whatever the version), and optional peers (`peerDependenciesMeta`) that no
+  consumer declares, which are never downloaded just to compute a tag.
+- **A package with nothing pinned keeps its plain `name@version` root.**
+- **The tag is a hash, so the pins are persisted** to `/instances/<root>.json` in
+  the cache before the root is ever emitted. A root with no such file was never
+  minted and is a 404; it is never served with guessed peers.
+- **The separator is `_`** because it cannot occur in a semver version, and it
+  survives static hosts that decode `+` in a path as a space.
+
+The lockfile is unchanged. Instance pins follow from the manifests plus the lock,
+so resolution stays reproducible without listing instances in it.
+
 ## License
 
 MIT
