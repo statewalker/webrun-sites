@@ -62,6 +62,7 @@ function mkCtx(cache: FilesApi): PreprocessContext {
     tRoot: "/t/browser",
     inflight: new Map(),
     proxies: new Map(),
+    instances: new Map(),
     globals: { process: "globalThis.process", Buffer: "globalThis.Buffer" },
     policy: {
       servedUrl: (targetId: string) => `./${targetId}`,

@@ -41,6 +41,9 @@ export interface PackageManifest {
   imports?: unknown;
   dependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
+  /** Only `optional` is read: an optional peer is pinned solely when a consumer declares it. */
+  peerDependenciesMeta?: Record<string, { optional?: boolean }>;
+  optionalDependencies?: Record<string, string>;
   [key: string]: unknown;
 }
 

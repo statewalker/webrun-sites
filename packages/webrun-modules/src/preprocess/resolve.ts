@@ -11,6 +11,7 @@ import { analyze, detectFormat } from "../transform/index.js";
 import type { EndpointBinding, EndpointResolver, ModuleImport, PackageManifest } from "../types.js";
 import { ModuleResolveError } from "../types.js";
 import { isCssFile, type PreprocessContext, urlPath } from "./context.js";
+import { isInstanceRoot, type PeerPins, rawKey, readInstancePins } from "./instances.js";
 
 const RAW_EXT = ["", ".js", ".mjs", ".cjs", ".json", "/index.js", "/index.mjs"];
 
@@ -75,7 +76,7 @@ function reusable(locked: string, spec: string | undefined): boolean {
 }
 
 async function cachedManifest(pkgKey: string, ctx: PreprocessContext): Promise<PackageManifest> {
-  return JSON.parse(await readText(ctx.cache, `/raw/${pkgKey}/package.json`));
+  return JSON.parse(await readText(ctx.cache, `/raw/${rawKey(pkgKey)}/package.json`));
 }
 
 /** Persist a loaded package's files under `/raw/{name}@{version}/…` (idempotent). */
@@ -100,8 +101,10 @@ async function cacheRaw(
   });
 }
 
-/** Lazily load a package's raw files by its `name@version` cache key (idempotent). */
-export async function ensureRawByKey(pkgKey: string, ctx: PreprocessContext): Promise<void> {
+/** Lazily load a package's raw files by its module root (idempotent). A
+ *  peer-qualified instance shares the raw files of its plain `name@version`. */
+export async function ensureRawByKey(root: string, ctx: PreprocessContext): Promise<void> {
+  const pkgKey = rawKey(root);
   return singleFlight(ctx, `raw:${pkgKey}`, async () => {
     if (await ctx.cache.exists(`/raw/${pkgKey}/package.json`)) return;
     const at = pkgKey.lastIndexOf("@");
@@ -475,6 +478,24 @@ export async function ensureGlobalsProxy(
   });
 }
 
+/** The pins of a peer-qualified instance root, memoised in `ctx.instances` and
+ *  otherwise read from its sidecar. `undefined` for a plain root, and for an
+ *  instance root nothing ever minted. */
+export async function pinsOf(root: string, ctx: PreprocessContext): Promise<PeerPins | undefined> {
+  if (!isInstanceRoot(root)) return undefined;
+  const hit = ctx.instances.get(root);
+  if (hit) return hit;
+  const stored = await readInstancePins(ctx.cache, root);
+  if (stored) ctx.instances.set(root, stored);
+  return stored;
+}
+
+/** A plain root is always servable; an instance root only once minted. A forged or
+ *  stale tag must be a miss — transforming it would bind peers by guesswork. */
+async function knownRoot(root: string, ctx: PreprocessContext): Promise<boolean> {
+  return !isInstanceRoot(root) || (await pinsOf(root, ctx)) !== undefined;
+}
+
 /** The version constraint a bare specifier should resolve to, from the importer's
  *  package: self-reference → own version; a dependency → the importer's range. */
 export async function importerVersion(
@@ -485,12 +506,13 @@ export async function importerVersion(
   const m = fromId.match(/^((?:@[^/]+\/)?[^/]+)@([^/]+)\//);
   if (!m) return undefined; // project file — no package context
   const [, impName, impVersion] = m;
-  if (pkg === impName) return impVersion; // self-reference → same version
-  const manifest = await cachedManifest(`${impName}@${impVersion}`, ctx).catch(() => undefined);
+  const root = `${impName}@${impVersion}`;
+  if (pkg === impName) return rawKey(root).slice(impName.length + 1); // self-reference → same version
+  const manifest = await cachedManifest(root, ctx).catch(() => undefined);
   return (
     manifest?.dependencies?.[pkg] ??
     manifest?.peerDependencies?.[pkg] ??
-    (manifest?.optionalDependencies as Record<string, string> | undefined)?.[pkg]
+    manifest?.optionalDependencies?.[pkg]
   );
 }
 
@@ -592,7 +614,7 @@ export async function resolveRawFile(
   ctx: PreprocessContext,
 ): Promise<string> {
   for (const ext of RAW_EXT) {
-    const stats = await ctx.cache.stats(`/raw/${pkgKey}/${file}${ext}`);
+    const stats = await ctx.cache.stats(`/raw/${rawKey(pkgKey)}/${file}${ext}`);
     if (stats?.kind === "file") return file + ext;
   }
   return file;
@@ -617,11 +639,13 @@ export async function loadRaw(
   const m = id.match(/^((?:@[^/]+\/)?[^/]+@[^/]+)\/(.+)$/);
   if (!m) throw new ModuleResolveError({ url: id }, "not a module id");
   const [, pkgKey, rawFile] = m;
+  if (!(await knownRoot(pkgKey, ctx))) throw new ModuleResolveError({ url: id }, "no such file");
   await ensureRawByKey(pkgKey, ctx);
   const file = await resolveRawFile(pkgKey, rawFile, ctx);
-  if ((await ctx.cache.stats(`/raw/${pkgKey}/${file}`))?.kind !== "file")
+  const raw = `/raw/${rawKey(pkgKey)}/${file}`;
+  if ((await ctx.cache.stats(raw))?.kind !== "file")
     throw new ModuleResolveError({ url: id }, "no such file");
-  const source = await readText(ctx.cache, `/raw/${pkgKey}/${file}`);
+  const source = await readText(ctx.cache, raw);
   const manifest = await cachedManifest(pkgKey, ctx).catch(() => undefined);
   return { path: `/${pkgKey}/${file}`, source, format: detectFormat(file, source, manifest) };
 }
@@ -640,10 +664,12 @@ export async function rawBytes(
   }
   const m = id.match(/^((?:@[^/]+\/)?[^/]+@[^/]+)\/(.+)$/);
   if (!m) return undefined;
+  if (!(await knownRoot(m[1], ctx))) return undefined;
   await ensureRawByKey(m[1], ctx);
   // The id is already canonical (the resolver did the extension/index probing), so
   // read it literally: probing here would serve `dir/index.js`'s bytes at the `dir`
   // URL, splitting one module across two URLs.
-  if ((await ctx.cache.stats(`/raw/${m[1]}/${m[2]}`))?.kind !== "file") return undefined;
-  return collect(ctx.cache.read(`/raw/${m[1]}/${m[2]}`));
+  const raw = `/raw/${rawKey(m[1])}/${m[2]}`;
+  if ((await ctx.cache.stats(raw))?.kind !== "file") return undefined;
+  return collect(ctx.cache.read(raw));
 }

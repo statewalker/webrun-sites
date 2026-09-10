@@ -11,6 +11,7 @@ import type {
   Source,
   Transform,
 } from "../types.js";
+import type { PeerPins } from "./instances.js";
 
 export type { HostRegistry } from "../types.js";
 
@@ -119,6 +120,12 @@ export interface PreprocessContext {
    * is stored here too, under the reserved `""` host binding.
    */
   proxies: Map<string, { binding: EndpointBinding; imp: ModuleImport }>;
+  /**
+   * Pins of each peer-qualified instance root (`name@version_p.<tag>`) this
+   * context has minted or read, memoising the `/instances/<root>.json` sidecars.
+   * The sidecar is authoritative; this map only saves re-reading it.
+   */
+  instances: Map<string, PeerPins>;
   policy: UrlPolicy;
   /** Input-type → transform registry consulted by `preprocessModule`. Drivers
    *  attach the default (`newDefaultTransformRegistry()`); an unregistered
