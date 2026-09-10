@@ -6,6 +6,7 @@ import {
   isInstanceRoot,
   peerTag,
   persistInstance,
+  plainVersion,
   rawKey,
   readInstancePins,
 } from "../src/preprocess/instances.js";
@@ -53,6 +54,13 @@ describe("peer-qualified instance roots", () => {
     expect(rawKey("lib@1.0.0")).toBe("lib@1.0.0");
     expect(isInstanceRoot(root)).toBe(true);
     expect(isInstanceRoot("lib@1.0.0")).toBe(false);
+  });
+
+  it("plainVersion strips the tag from a version and leaves plain versions alone", () => {
+    expect(plainVersion("1.2.4_p.0123456789abcdef")).toBe("1.2.4");
+    expect(plainVersion("1.2.4")).toBe("1.2.4");
+    expect(plainVersion("2.0.0-alpha.4")).toBe("2.0.0-alpha.4");
+    expect(plainVersion("^1.0.0")).toBe("^1.0.0");
   });
 
   it("does not mistake a prerelease for a tag", () => {

@@ -32,6 +32,11 @@ export function rawKey(root: string): string {
   return root.replace(PEER_TAG, "");
 }
 
+/** A version with any peer tag stripped: `1.2.4_p.<tag>` → `1.2.4`. */
+export function plainVersion(version: string): string {
+  return version.replace(PEER_TAG, "");
+}
+
 export function isInstanceRoot(root: string): boolean {
   return PEER_TAG.test(root);
 }

@@ -16,6 +16,7 @@ import {
   isInstanceRoot,
   type PeerPins,
   persistInstance,
+  plainVersion,
   rawKey,
   readInstancePins,
 } from "./instances.js";
@@ -128,17 +129,24 @@ export async function ensurePackage(
   ctx: PreprocessContext,
 ): Promise<{ name: string; version: string; file: string; id: string; manifest: PackageManifest }> {
   const name = ref.pkg;
-  return singleFlight(ctx, `pkg:${name}@${ref.version ?? ""}#${ref.subpath ?? ""}`, async () => {
+  // A peer-tagged version (`1.2.4_p.<tag>`) names that exact plain version. Left
+  // tagged it is no semver, and `reusable` would take it for a dist-tag and hand
+  // back whatever version the lock holds.
+  const wanted = ref.version === undefined ? undefined : plainVersion(ref.version);
+  return singleFlight(ctx, `pkg:${name}@${wanted ?? ""}#${ref.subpath ?? ""}`, async () => {
     const locked = ctx.lock[name];
     let version: string;
     let manifest: PackageManifest;
-    if (locked && reusable(locked, ref.version)) {
+    if (locked && reusable(locked, wanted)) {
       // Honor the lock even on a cold cache — load the *locked* version, not latest.
       version = locked;
       await ensureRawByKey(`${name}@${version}`, ctx);
       manifest = await cachedManifest(`${name}@${version}`, ctx);
     } else {
-      const loaded = await matchSource(ref, ctx).load({ pkg: name, version: ref.version });
+      const loaded = await matchSource({ ...ref, version: wanted }, ctx).load({
+        pkg: name,
+        version: wanted,
+      });
       version = loaded.version;
       await cacheRaw(name, version, loaded.files, loaded.manifest, ctx);
       manifest = loaded.manifest;

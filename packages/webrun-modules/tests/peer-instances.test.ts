@@ -249,6 +249,26 @@ describe("peer-qualified instances", () => {
   });
 });
 
+describe("a peer-tagged version in a ModuleRef", () => {
+  const TWO: FixtureRegistry = {
+    lib: {
+      "1.0.0": { files: { "index.js": `export const v = 1;`, "one.js": `export {};` } },
+      "2.0.0": { files: { "index.js": `export const v = 2;`, "two.js": `export {};` } },
+    },
+  };
+
+  it("means that exact plain version, not whatever the lock holds", async () => {
+    const s = newModuleServer({
+      cache: new MemFilesApi(),
+      sources: [registrySource(TWO)],
+      lock: { lib: "2.0.0" },
+    });
+    const tagged = await s.listPackageFiles({ pkg: "lib", version: "1.0.0_p.0123456789abcdef" });
+    expect(tagged).toContain("one.js");
+    expect(tagged).toEqual(await s.listPackageFiles({ pkg: "lib", version: "1.0.0" }));
+  });
+});
+
 /**
  * Wraps a `FilesApi`, splitting a write under `/instances/` into an EMPTY write
  * followed — after a macrotask yield — by the real content. This simulates a
