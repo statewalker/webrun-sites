@@ -11,7 +11,14 @@ import { analyze, detectFormat } from "../transform/index.js";
 import type { EndpointBinding, EndpointResolver, ModuleImport, PackageManifest } from "../types.js";
 import { ModuleResolveError } from "../types.js";
 import { isCssFile, type PreprocessContext, urlPath } from "./context.js";
-import { isInstanceRoot, type PeerPins, rawKey, readInstancePins } from "./instances.js";
+import {
+  instanceRoot,
+  isInstanceRoot,
+  type PeerPins,
+  persistInstance,
+  rawKey,
+  readInstancePins,
+} from "./instances.js";
 
 const RAW_EXT = ["", ".js", ".mjs", ".cjs", ".json", "/index.js", "/index.mjs"];
 
@@ -57,7 +64,8 @@ export function makeDefaultEndpointResolver(ctx: PreprocessContext): EndpointRes
       const { pkg, subpath } = parseSpecifier(spec);
       const version = await importerVersion(pkg, ectx.importerId, ctx);
       const t = await ensurePackage({ pkg, version, subpath }, ctx);
-      return t.id; // canonical id; the served endpoint url is `urlPath(t.id)`
+      const root = await linkRoot(t, ectx.importerId, ctx);
+      return `${root}/${t.file}`; // canonical id; the served endpoint url is `urlPath(id)`
     },
   });
 }
@@ -496,6 +504,53 @@ async function knownRoot(root: string, ctx: PreprocessContext): Promise<boolean>
   return !isInstanceRoot(root) || (await pinsOf(root, ctx)) !== undefined;
 }
 
+/**
+ * The peers of `target` as `importerId` supplies them. A peer is the CONSUMER's to
+ * supply, so each pin is the importer's own declaration — or, when the importer is
+ * itself an instance, its pin — and falls back to `target`'s peer range only when
+ * the importer declares nothing. Host-provided peers bind to the host whatever the
+ * version, and an optional peer nobody declares is never fetched just to be pinned.
+ */
+async function peerPins(
+  target: { manifest: PackageManifest },
+  importerId: string,
+  ctx: PreprocessContext,
+): Promise<PeerPins> {
+  const peers = target.manifest.peerDependencies ?? {};
+  const meta = target.manifest.peerDependenciesMeta ?? {};
+  const pins: PeerPins = {};
+  for (const peer of Object.keys(peers).sort()) {
+    if (providedNames(peer, ctx)) continue;
+    const declared = await importerVersion(peer, importerId, ctx);
+    if (declared === undefined && meta[peer]?.optional) continue;
+    pins[peer] = (
+      await ensurePackage({ pkg: peer, version: declared ?? peers[peer] }, ctx)
+    ).version;
+  }
+  return pins;
+}
+
+/**
+ * The module root `target` is served under for `importerId`: its plain
+ * `name@version`, or a peer-qualified instance when it has pinned peers. The pins
+ * are persisted BEFORE the root is returned, because the root is about to be
+ * emitted into a proxy and the tag alone cannot say which peers it means.
+ */
+export async function linkRoot(
+  target: { name: string; version: string; manifest: PackageManifest },
+  importerId: string,
+  ctx: PreprocessContext,
+): Promise<string> {
+  const plain = `${target.name}@${target.version}`;
+  const pins = await peerPins(target, importerId, ctx);
+  const root = instanceRoot(plain, pins);
+  if (root !== plain && !ctx.instances.has(root)) {
+    await persistInstance(ctx.cache, root, pins);
+    ctx.instances.set(root, pins);
+  }
+  return root;
+}
+
 /** The version constraint a bare specifier should resolve to, from the importer's
  *  package: self-reference → own version; a dependency → the importer's range. */
 export async function importerVersion(
@@ -507,6 +562,8 @@ export async function importerVersion(
   if (!m) return undefined; // project file — no package context
   const [, impName, impVersion] = m;
   const root = `${impName}@${impVersion}`;
+  const pinned = (await pinsOf(root, ctx))?.[pkg];
+  if (pinned) return pinned; // a peer of the importing instance → exactly its pin
   if (pkg === impName) return rawKey(root).slice(impName.length + 1); // self-reference → same version
   const manifest = await cachedManifest(root, ctx).catch(() => undefined);
   return (
