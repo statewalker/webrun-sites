@@ -37,6 +37,7 @@
     "example:site": "tsx examples/site-pipeline.ts",
     "example:tsx-page": "tsx examples/tsx-page.ts",
     "example:verify": "tsx examples/verify-deps-layout.ts",
+    "proto:peers": "tsx prototype/peer-instances/run.ts",
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {

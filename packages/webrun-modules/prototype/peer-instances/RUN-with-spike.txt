@@ -1,0 +1,31 @@
+exp1 · current behaviour (no pin)
+  @napi-rs/wasm-runtime@1.2.4_p.75f1bf08  →  @emnapi/core@1.11.2
+  @napi-rs/wasm-runtime@1.2.4_p.64431f14  →  @emnapi/core@2.0.0-alpha.4
+  PASS  oxc       resolver ran → {"error":"Cannot find module './nowhere'"}
+  PASS  rolldown  bundled → "//#endregion export { x };"
+exp1 · lock @emnapi/* = 1.11.2 (oxc's pin)
+  @napi-rs/wasm-runtime@1.2.4_p.75f1bf08  →  @emnapi/core@1.11.2
+  @napi-rs/wasm-runtime@1.2.4_p.64431f14  →  @emnapi/core@2.0.0-alpha.4
+  PASS  oxc       resolver ran → {"error":"Cannot find module './nowhere'"}
+  PASS  rolldown  bundled → "//#endregion export { x };"
+exp1 · lock @emnapi/* = 2.0.0-alpha.4 (rolldown's pin)
+  @napi-rs/wasm-runtime@1.2.4_p.75f1bf08  →  @emnapi/core@1.11.2
+  @napi-rs/wasm-runtime@1.2.4_p.64431f14  →  @emnapi/core@2.0.0-alpha.4
+  PASS  oxc       resolver ran → {"error":"Cannot find module './nowhere'"}
+  PASS  rolldown  bundled → "//#endregion export { x };"
+exp2 · one server, one page, order oxc → rolldown
+  @napi-rs/wasm-runtime@1.2.4_p.64431f14  →  @emnapi/core@2.0.0-alpha.4
+  @napi-rs/wasm-runtime@1.2.4_p.75f1bf08  →  @emnapi/core@1.11.2
+  PASS  oxc       resolver ran → {"error":"Cannot find module './nowhere'"}
+  PASS  rolldown  bundled → "//#endregion export { x };"
+exp2 · one server, one page, order rolldown → oxc
+  @napi-rs/wasm-runtime@1.2.4_p.64431f14  →  @emnapi/core@2.0.0-alpha.4
+  @napi-rs/wasm-runtime@1.2.4_p.75f1bf08  →  @emnapi/core@1.11.2
+  PASS  rolldown  bundled → "//#endregion export { x };"
+  PASS  oxc       resolver ran → {"error":"Cannot find module './nowhere'"}
+exp3 · run 1 (cold)
+  @napi-rs/wasm-runtime@1.2.4_p.75f1bf08  →  @emnapi/core@1.11.2
+  PASS  oxc       resolver ran → {"error":"Cannot find module './nowhere'"}
+exp3 · run 2 (restart, instance evicted)
+  @napi-rs/wasm-runtime@1.2.4_p.75f1bf08  →  @emnapi/core@1.11.2
+  PASS  oxc       resolver ran → {"error":"Cannot find module './nowhere'"}
