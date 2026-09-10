@@ -535,6 +535,14 @@ async function peerPins(
  * `name@version`, or a peer-qualified instance when it has pinned peers. The pins
  * are persisted BEFORE the root is returned, because the root is about to be
  * emitted into a proxy and the tag alone cannot say which peers it means.
+ *
+ * The persist-and-memoise step is single-flighted per root: two importers that
+ * mint the SAME new root concurrently (e.g. two files of one package bare-importing
+ * the same peer-having package) would otherwise both race `persistInstance` on a
+ * cold cache. `persistInstance` is only a no-op for a REPEAT of the exact same
+ * pins — a genuinely non-atomic write (a real `fs.writeFile` truncates before it
+ * writes) can let a concurrent read land on a transiently empty sidecar and throw
+ * a spurious `collision`, not a real one.
  */
 export async function linkRoot(
   target: { name: string; version: string; manifest: PackageManifest },
@@ -545,8 +553,11 @@ export async function linkRoot(
   const pins = await peerPins(target, importerId, ctx);
   const root = instanceRoot(plain, pins);
   if (root !== plain && !ctx.instances.has(root)) {
-    await persistInstance(ctx.cache, root, pins);
-    ctx.instances.set(root, pins);
+    await singleFlight(ctx, `instance:${root}`, async () => {
+      if (ctx.instances.has(root)) return; // minted by a coalesced concurrent caller
+      await persistInstance(ctx.cache, root, pins);
+      ctx.instances.set(root, pins);
+    });
   }
   return root;
 }

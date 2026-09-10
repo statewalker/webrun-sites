@@ -1,3 +1,4 @@
+import type { FilesApi } from "@statewalker/webrun-files";
 import { readText } from "@statewalker/webrun-files";
 import { MemFilesApi } from "@statewalker/webrun-files-mem";
 import { afterEach, describe, expect, it } from "vitest";
@@ -197,5 +198,94 @@ describe("peer-qualified instances", () => {
     await cache.remove(`/t/browser/${a}`);
     const s2 = newModuleServer({ cache, sources: [registrySource(REG)] });
     expect(await peerVia(s2, a, "core")).toBe("1.0.0");
+  });
+});
+
+/**
+ * Wraps a `FilesApi`, splitting a write under `/instances/` into an EMPTY write
+ * followed — after a macrotask yield — by the real content. This simulates a
+ * non-atomic `fs.writeFile` (truncate, then write) so a concurrent reader can land
+ * in the gap and observe a transiently empty sidecar, exactly as `tryReadText`
+ * would on a real Node cache mid-write. `onWriteStarted` fires right after the
+ * "truncate", before the yield, so a test can launch its second concurrent linker
+ * exactly inside the gap instead of hoping two independent request pipelines
+ * happen to interleave there on their own.
+ */
+function tornInstanceWrites(delegate: FilesApi, onWriteStarted?: () => void): FilesApi {
+  return {
+    read: (path, options) => delegate.read(path, options),
+    async write(path, content) {
+      if (!path.startsWith("/instances/")) return delegate.write(path, content);
+      const chunks: Uint8Array[] = [];
+      for await (const c of content) chunks.push(c);
+      await delegate.write(path, [new Uint8Array(0)]); // "truncate"
+      onWriteStarted?.();
+      await new Promise((r) => setTimeout(r, 0)); // yield — a concurrent read lands here
+      await delegate.write(path, chunks); // the real body, arriving late
+    },
+    mkdir: (path) => delegate.mkdir(path),
+    list: (path, options) => delegate.list(path, options),
+    stats: (path) => delegate.stats(path),
+    exists: (path) => delegate.exists(path),
+    remove: (path) => delegate.remove(path),
+    move: (source, target) => delegate.move(source, target),
+    copy: (source, target) => delegate.copy(source, target),
+  };
+}
+
+describe("concurrent mints of one instance root", () => {
+  // Two files of ONE package, both bare-importing the same peer-having package
+  // with the same pin, so linking either one mints the identical new instance
+  // root. `linkRoot`'s persist-and-memoise step is not single-flighted unless the
+  // fix is applied, so two concurrent mints of the same NEW root can race.
+  const RACE: FixtureRegistry = {
+    core: { "1.0.0": { files: { "index.js": `export const v = "core1";` } } },
+    runtime: {
+      "1.0.0": {
+        peerDependencies: { core: "^1.0.0" },
+        files: { "index.js": `import { v } from "core";\nexport const which = v;` },
+      },
+    },
+    duo: {
+      "1.0.0": {
+        dependencies: { runtime: "^1.0.0", core: "1.0.0" },
+        files: {
+          "a.js": `export { which } from "runtime";`,
+          "b.js": `export { which } from "runtime";`,
+        },
+      },
+    },
+  };
+
+  it("mints the same new instance once, not a spurious collision, under a torn concurrent write", async () => {
+    // Launching both fetches together (`Promise.all`) is not enough: on an
+    // in-memory cache both requests reach `tryReadText`'s existence check before
+    // either has written anything, so neither observes the other's write. The gate
+    // below launches the SECOND request exactly when the FIRST's sidecar write has
+    // begun (right after its "truncate", before its real content lands) — the same
+    // window a real non-atomic `fs.writeFile` leaves open on a Node cache.
+    let releaseB = () => {};
+    const bGate = new Promise<void>((resolve) => {
+      releaseB = resolve;
+    });
+    const cache = tornInstanceWrites(new MemFilesApi(), () => releaseB());
+    const s = newModuleServer({ cache, sources: [registrySource(RACE)] });
+    const pa = s.fetch(new Request("http://x/duo@1.0.0/a.js"));
+    await bGate;
+    const pb = s.fetch(new Request("http://x/duo@1.0.0/b.js"));
+    const [ra, rb] = await Promise.all([pa, pb]);
+    const [ta, tb] = await Promise.all([ra.text(), rb.text()]);
+    expect({ statusA: ra.status, bodyA: ta, statusB: rb.status, bodyB: tb }).toEqual({
+      statusA: 200,
+      bodyA: expect.stringContaining("./~deps/runtime/index.js"),
+      statusB: 200,
+      bodyB: expect.stringContaining("./~deps/runtime/index.js"),
+    });
+    // Both files' proxy is the SAME instance — one root minted, not two.
+    const proxyA = await (
+      await s.fetch(new Request("http://x/duo@1.0.0/~deps/runtime/index.js"))
+    ).text();
+    const root = proxyA.match(/runtime@[^/"]+/)?.[0];
+    expect(root).toMatch(/^runtime@1\.0\.0_p\.[0-9a-f]{16}$/);
   });
 });
