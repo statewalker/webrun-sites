@@ -3,6 +3,7 @@ import { readText } from "@statewalker/webrun-files";
 import { MemFilesApi } from "@statewalker/webrun-files-mem";
 import { afterEach, describe, expect, it } from "vitest";
 import { HOST_REGISTRY_KEY, newHostRegistry } from "../src/deps/host-registry.js";
+import { instanceRoot } from "../src/preprocess/instances.js";
 import { newModuleServer } from "../src/server/new-module-server.js";
 import type { ModuleServer, ModuleServerOptions } from "../src/types.js";
 import { type FixtureRegistry, registrySource } from "./_packages.js";
@@ -89,6 +90,26 @@ const REG: FixtureRegistry = {
     "1.0.0": {
       dependencies: { wrapper: "^1.0.0", core: "1.0.0" },
       files: { "index.js": `export { which } from "wrapper";` },
+    },
+  },
+  // Both declare a peer no source has, and never import it (a typescript-style
+  // peer). `haunted` also has a real peer, so its OTHER pin still decides a tag.
+  haunted: {
+    "1.0.0": {
+      peerDependencies: { core: "^1.0.0", ghost: ">=5" },
+      files: { "index.js": `import { v } from "core";\nexport const which = v;` },
+    },
+  },
+  ghostly: {
+    "1.0.0": {
+      peerDependencies: { ghost: ">=5" },
+      files: { "index.js": `export const g = 1;` },
+    },
+  },
+  seer: {
+    "1.0.0": {
+      dependencies: { haunted: "^1.0.0", ghostly: "^1.0.0", core: "1.0.0" },
+      files: { "index.js": `export { which } from "haunted";\nexport { g } from "ghostly";` },
     },
   },
 };
@@ -178,6 +199,21 @@ describe("peer-qualified instances", () => {
     expect(root).toMatch(TAGGED("opt"));
     expect(JSON.parse(await readText(cache, `/instances/${root}.json`))).toEqual({ core: "1.0.0" });
     expect(loads.extra ?? 0).toBe(0);
+  });
+
+  it("leaves a peer no source can supply unpinned, rather than failing its consumer", async () => {
+    const cache = new MemFilesApi();
+    const s = newModuleServer({ cache, sources: [registrySource(REG)] });
+    const res = await s.fetch(new Request("http://x/seer@1.0.0/index.js"));
+    expect(res.status).toBe(200);
+    // The other pin still decides the tag, and the missing peer is not among the pins.
+    const haunted = await rootVia(s, "seer@1.0.0", "haunted");
+    expect(haunted).toBe(instanceRoot("haunted@1.0.0", { core: "1.0.0" }));
+    expect(JSON.parse(await readText(cache, `/instances/${haunted}.json`))).toEqual({
+      core: "1.0.0",
+    });
+    // Nothing else pinned: the target keeps its plain root.
+    expect(await rootVia(s, "seer@1.0.0", "ghostly")).toBe("ghostly@1.0.0");
   });
 
   it("keeps a package without peers on its plain root", async () => {

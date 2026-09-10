@@ -510,6 +510,12 @@ async function knownRoot(root: string, ctx: PreprocessContext): Promise<boolean>
  * itself an instance, its pin — and falls back to `target`'s peer range only when
  * the importer declares nothing. Host-provided peers bind to the host whatever the
  * version, and an optional peer nobody declares is never fetched just to be pinned.
+ *
+ * A peer no source can supply (a `ModuleResolveError`) is left unpinned too: many
+ * packages declare a peer they never import, and the tag alone must not make them
+ * unservable. If the target does import it, that import fails as it always did.
+ * Any OTHER failure propagates — skipping a peer on a transient error would
+ * silently mint a different root.
  */
 async function peerPins(
   target: { manifest: PackageManifest },
@@ -523,9 +529,13 @@ async function peerPins(
     if (providedNames(peer, ctx)) continue;
     const declared = await importerVersion(peer, importerId, ctx);
     if (declared === undefined && meta[peer]?.optional) continue;
-    pins[peer] = (
-      await ensurePackage({ pkg: peer, version: declared ?? peers[peer] }, ctx)
-    ).version;
+    try {
+      pins[peer] = (
+        await ensurePackage({ pkg: peer, version: declared ?? peers[peer] }, ctx)
+      ).version;
+    } catch (error) {
+      if (!(error instanceof ModuleResolveError)) throw error;
+    }
   }
   return pins;
 }

@@ -618,6 +618,8 @@ Both instances share the one set of raw files.
 - **Not pinned:** host-provided names (they bind to the `provided` instance
   whatever the version), and optional peers (`peerDependenciesMeta`) that no
   consumer declares, which are never downloaded just to compute a tag.
+  A peer that no source can supply is left unpinned too (its import, if any,
+  fails as it always did).
 - **A package with nothing pinned keeps its plain `name@version` root.**
 - **The tag is a hash, so the pins are persisted** to `/instances/<root>.json` in
   the cache before the root is ever emitted. A root with no such file was never
