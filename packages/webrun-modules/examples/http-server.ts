@@ -121,12 +121,16 @@ const CORS = corsHeaders(true);
  * transfer fails — `DataCloneError: SharedArrayBuffer transfer requires
  * self.crossOriginIsolated`.
  *
- * COOP/COEP are document-level policies; setting them on a JavaScript response
- * does nothing. That is why they go on the index page here rather than into the
- * `cors` record below.
+ * COOP goes on the page. COEP goes on EVERY response: a dedicated worker started
+ * from an isolated page is blocked (`net::ERR_BLOCKED_BY_RESPONSE`) unless its own
+ * script response carries a compatible COEP, and any JS file this server hands
+ * out can be the script a package passes to `new Worker(...)` — rolldown does
+ * exactly that with `wasi-worker-browser.mjs`.
  */
 const ISOLATION: Record<string, string> = {
   "cross-origin-opener-policy": "same-origin",
+};
+const EMBEDDER: Record<string, string> = {
   "cross-origin-embedder-policy": "require-corp",
 };
 
@@ -146,7 +150,7 @@ const INDEX_HTML = `<!doctype html>
 
 // Minimal Node http → Web-fetch adapter (no framework: server.fetch is standard).
 const http = createServer(async (nodeReq, nodeRes) => {
-  for (const [k, v] of Object.entries(CORS)) nodeRes.setHeader(k, v);
+  for (const [k, v] of Object.entries({ ...CORS, ...EMBEDDER })) nodeRes.setHeader(k, v);
   if (nodeReq.method === "OPTIONS") {
     nodeRes.statusCode = 204;
     nodeRes.end();
