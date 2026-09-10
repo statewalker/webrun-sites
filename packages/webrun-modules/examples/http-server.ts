@@ -67,8 +67,11 @@ async function handle(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const { pathname } = url;
   if (pathname === "/" || pathname === "") {
-    return new Response("webrun-modules unpkg-like server — try /debug or /lodash-es@4/merge\n", {
-      headers: { "content-type": "text/plain" },
+    // Served as a DOCUMENT, with the two headers that make it cross-origin
+    // isolated. See ISOLATION below for why a plain text index is not enough
+    // for packages like @rolldown/browser.
+    return new Response(INDEX_HTML, {
+      headers: { "content-type": "text/html; charset=utf-8", ...ISOLATION },
     });
   }
   const spec = parseSpec(decodeURIComponent(pathname.slice(1)));
@@ -105,6 +108,41 @@ async function handle(request: Request): Promise<Response> {
 // are ours to cover, so apply the same header set (from the library, not a copy)
 // at the adapter, where every response passes through exactly once.
 const CORS = corsHeaders(true);
+
+/**
+ * Headers that make a DOCUMENT cross-origin isolated, which is what
+ * `SharedArrayBuffer` requires.
+ *
+ * Some packages are WASM builds that thread: `@rolldown/browser` spawns workers
+ * and hands each one a `SharedArrayBuffer`. A browser refuses to postMessage a
+ * SharedArrayBuffer unless `self.crossOriginIsolated` is true, and that flag is
+ * set by these two headers ON THE PAGE, not on the module. Import such a package
+ * into a page without them and the module loads, the worker starts, and only the
+ * transfer fails — `DataCloneError: SharedArrayBuffer transfer requires
+ * self.crossOriginIsolated`.
+ *
+ * COOP/COEP are document-level policies; setting them on a JavaScript response
+ * does nothing. That is why they go on the index page here rather than into the
+ * `cors` record below.
+ */
+const ISOLATION: Record<string, string> = {
+  "cross-origin-opener-policy": "same-origin",
+  "cross-origin-embedder-policy": "require-corp",
+};
+
+const INDEX_HTML = `<!doctype html>
+<meta charset="utf-8">
+<title>webrun-modules</title>
+<h1>webrun-modules — unpkg-like server</h1>
+<p>This page is <b id="coi">…</b>, so a threaded WASM package can run from here.</p>
+<p>Try in the console:</p>
+<pre>x = await import("/@rolldown/browser@1.2.8/dist/index.browser.mjs")</pre>
+<p>Or <code>/debug</code>, <code>/lodash-es@4/merge</code>, <code>?meta</code>, <code>?graph</code>.</p>
+<script>
+  document.getElementById("coi").textContent =
+    self.crossOriginIsolated ? "cross-origin isolated" : "NOT cross-origin isolated";
+</script>
+`;
 
 // Minimal Node http → Web-fetch adapter (no framework: server.fetch is standard).
 const http = createServer(async (nodeReq, nodeRes) => {
