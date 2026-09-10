@@ -1,5 +1,5 @@
 import type { FilesApi } from "@statewalker/webrun-files";
-import { readText } from "@statewalker/webrun-files";
+import { readText, writeText } from "@statewalker/webrun-files";
 import { MemFilesApi } from "@statewalker/webrun-files-mem";
 import { afterEach, describe, expect, it } from "vitest";
 import { HOST_REGISTRY_KEY, newHostRegistry } from "../src/deps/host-registry.js";
@@ -214,6 +214,18 @@ describe("peer-qualified instances", () => {
     });
     // Nothing else pinned: the target keeps its plain root.
     expect(await rootVia(s, "seer@1.0.0", "ghostly")).toBe("ghostly@1.0.0");
+  });
+
+  it("gives a package's entry the same root a project import of it gets", async () => {
+    const project = new MemFilesApi();
+    await writeText(project, "/main.js", `export { which } from "runtime";`);
+    const s = server({ project });
+    const entry = await s.resolve({ pkg: "runtime" });
+    await get(s, "/~/main.js");
+    const proxy = await get(s, "/~/~deps/runtime/index.js");
+    const viaProject = proxy.match(/runtime@[^/"]+/)?.[0];
+    expect(viaProject).toMatch(TAGGED("runtime"));
+    expect(entry.url).toBe(`/${viaProject}/index.js`);
   });
 
   it("keeps a package without peers on its plain root", async () => {

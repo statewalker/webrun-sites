@@ -10,7 +10,12 @@ import {
 } from "../preprocess/context.js";
 import { cssModuleWrapper, preprocessModule, serveJsonModule } from "../preprocess/module.js";
 import { newDefaultTransformRegistry } from "../preprocess/registry.js";
-import { ensurePackage, makeDefaultEndpointResolver, rawBytes } from "../preprocess/resolve.js";
+import {
+  ensurePackage,
+  linkRoot,
+  makeDefaultEndpointResolver,
+  rawBytes,
+} from "../preprocess/resolve.js";
 import { walkFrom } from "../preprocess/walk.js";
 import { npmRegistrySource } from "../sources/npm-registry-source.js";
 import { newDefaultCssTransform } from "../transform/css/index.js";
@@ -161,7 +166,11 @@ export function newModuleServer(options: ModuleServerOptions): ModuleServer {
       const p = idFromPath(ref.url);
       return p.startsWith("~/") ? p : `~/${p.replace(/^\//, "")}`;
     }
-    return (await ensurePackage(ref, ctx)).id;
+    // Linked like any import, with no importer: an entry has no consumer, so its
+    // peers fall back to their ranges exactly as they do for a project import.
+    // Returning the plain root here would serve one resolution under two URLs.
+    const t = await ensurePackage(ref, ctx);
+    return `${await linkRoot(t, "", ctx)}/${t.file}`;
   }
 
   return {
