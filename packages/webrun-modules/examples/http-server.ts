@@ -31,7 +31,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodeFilesApi } from "@statewalker/webrun-files-node";
 import semver from "semver";
-import { corsHeaders, newModuleServer, npmRegistrySource } from "../src/index.js";
+import { corsHeaders, newModuleServer, npmRegistrySource, rawKey } from "../src/index.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
 const cacheDir = await mkdtemp(join(tmpdir(), "webrun-modules-unpkg-"));
@@ -67,9 +67,9 @@ async function handle(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const { pathname } = url;
   if (pathname === "/" || pathname === "") {
-    // Served as a DOCUMENT, with the two headers that make it cross-origin
-    // isolated. See ISOLATION below for why a plain text index is not enough
-    // for packages like @rolldown/browser.
+    // Served as a DOCUMENT, so it can be cross-origin isolated: COOP here, COEP
+    // from the adapter (which puts it on every response). See ISOLATION below for
+    // why a plain text index is not enough for packages like @rolldown/browser.
     return new Response(INDEX_HTML, {
       headers: { "content-type": "text/html; charset=utf-8", ...ISOLATION },
     });
@@ -86,7 +86,13 @@ async function handle(request: Request): Promise<Response> {
   }
 
   // Already pinned (exact version + a file) → serve the transformed module directly.
-  if (spec.version && semver.valid(spec.version) && spec.subpath) return server.fetch(request);
+  // A peer-qualified instance (`name@1.2.4_p.<tag>`) is pinned too: its version is
+  // an exact one plus a tag, so test what `rawKey` leaves of the root. Sent through
+  // `resolve` instead, the tag reads as a dist-tag and 302s to the PLAIN root,
+  // collapsing every instance of the package onto one.
+  const pinned =
+    spec.version && semver.valid(rawKey(`${spec.pkg}@${spec.version}`).slice(spec.pkg.length + 1));
+  if (pinned && spec.subpath) return server.fetch(request);
   // Otherwise resolve the spec to its pinned entry and redirect (unpkg-style).
   try {
     const resolved = await server.resolve(spec);
@@ -104,28 +110,30 @@ async function handle(request: Request): Promise<Response> {
 }
 
 // `cors: true` covers everything ModuleServer.fetch returns. The routes THIS file
-// adds around it — the unpkg-style 302s, the index text, the ?meta/?graph JSON —
+// adds around it — the unpkg-style 302s, the index page, the ?meta/?graph JSON —
 // are ours to cover, so apply the same header set (from the library, not a copy)
 // at the adapter, where every response passes through exactly once.
 const CORS = corsHeaders(true);
 
 /**
- * Headers that make a DOCUMENT cross-origin isolated, which is what
- * `SharedArrayBuffer` requires.
+ * The headers that make a DOCUMENT cross-origin isolated, which is what
+ * `SharedArrayBuffer` requires: COOP (`ISOLATION`) and COEP (`EMBEDDER`).
  *
  * Some packages are WASM builds that thread: `@rolldown/browser` spawns workers
  * and hands each one a `SharedArrayBuffer`. A browser refuses to postMessage a
  * SharedArrayBuffer unless `self.crossOriginIsolated` is true, and that flag is
- * set by these two headers ON THE PAGE, not on the module. Import such a package
- * into a page without them and the module loads, the worker starts, and only the
- * transfer fails — `DataCloneError: SharedArrayBuffer transfer requires
- * self.crossOriginIsolated`.
+ * set by the PAGE's response carrying both headers, not by the module's. Import
+ * such a package into a page without them and the module loads, the worker
+ * starts, and only the transfer fails — `DataCloneError: SharedArrayBuffer
+ * transfer requires self.crossOriginIsolated`.
  *
- * COOP goes on the page. COEP goes on EVERY response: a dedicated worker started
- * from an isolated page is blocked (`net::ERR_BLOCKED_BY_RESPONSE`) unless its own
- * script response carries a compatible COEP, and any JS file this server hands
- * out can be the script a package passes to `new Worker(...)` — rolldown does
- * exactly that with `wasi-worker-browser.mjs`.
+ * COOP goes on the page only: `handle` adds `ISOLATION` to the index response.
+ * COEP goes on EVERY response, the page included, so the adapter sets `EMBEDDER`
+ * on all of them: a dedicated worker started from an isolated page is blocked
+ * (`net::ERR_BLOCKED_BY_RESPONSE`) unless its own script response carries a
+ * compatible COEP, and any JS file this server hands out can be the script a
+ * package passes to `new Worker(...)` — rolldown does exactly that with
+ * `wasi-worker-browser.mjs`.
  */
 const ISOLATION: Record<string, string> = {
   "cross-origin-opener-policy": "same-origin",

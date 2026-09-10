@@ -16,6 +16,8 @@ export {
   normalizeDepsFolder,
   urlPath,
 } from "./preprocess/context.js";
+export type { PeerPins } from "./preprocess/instances.js";
+export { isInstanceRoot, rawKey } from "./preprocess/instances.js";
 export { cssModuleWrapper, preprocessModule, serveJsonModule } from "./preprocess/module.js";
 export {
   newDefaultTransformRegistry,
