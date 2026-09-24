@@ -388,13 +388,16 @@ above), and CSS source maps (tracked for a later `map` field on
 
 `server.fetch(request)` is a plain `(Request) => Promise<Response>`:
 
-- JS/TS module files are transformed and served as `text/javascript`;
+- JS/TS module files are transformed and served as `text/javascript` — except
+  `*.worker.js`, see [Classic worker scripts](#classic-worker-scripts) below;
 - `.css` files are processed (see [CSS](#css) below) — a bare `.css` URL serves
   processed `text/css`; `?module` serves a JS wrapper;
 - other non-module files (`package.json`, `README.md`, …) are served **raw**,
   untransformed, with a content-type guessed from the extension
   (`application/json`, `text/markdown`, …);
-- append `?raw` to get the raw bytes of *any* file as `application/octet-stream`;
+- append `?raw` to get the raw bytes of *any* file, with the same
+  extension-guessed content-type (an unknown extension falls back to
+  `application/octet-stream`);
 - an unresolvable path returns a `404` `Response` (never throws) — including a
   path that names a directory, or a file the package does not ship;
 - a file that IS there but cannot be processed — most often because one of its
@@ -403,6 +406,27 @@ above), and CSS source maps (tracked for a later `map` field on
   404 …`). "Not found" and "found, but broken" are different answers, and a
   browser reports the second only as `Failed to fetch dynamically imported
   module`, so the body is the one place the cause is visible.
+
+### Classic worker scripts
+
+A `*.worker.js` is served **untransformed**, as `text/javascript`.
+
+The only consumer of such a file is `new Worker(url)`, which loads it as a
+*classic* script — and a classic script cannot contain `import`/`export`. The
+default transform wraps every served script in ESM, so a transformed worker body
+does not parse; `new Worker()` reports that `SyntaxError` asynchronously through
+the worker's `onerror` and nowhere else, so a caller that does not listen for it
+hangs forever with no error anywhere. How a file is *loaded* decides what it may
+contain, and no caller of a `*.worker.js` can want the ESM wrap.
+
+The rule is anchored at the end of the path and narrow to `.js`:
+`*.worker.js.map` is still served as JSON, and `*.worker.jsx` / `*.worker.ts` are
+still compiled (they have to be — nothing can load them otherwise).
+
+Such files are not reachable from any module's import graph, so `listResources`
+does not report them. A static export that must ship them should find them with
+`listPackageFiles` and fetch each one; the plain URL is enough, `?raw` is not
+needed.
 
 Mount it under any `basePath` (returned URLs carry the prefix; the cached bytes
 stay portable, because internal imports are rewritten as **relative** URLs):

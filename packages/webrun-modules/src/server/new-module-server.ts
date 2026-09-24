@@ -33,6 +33,39 @@ const MODULE_EXT = /\.(?:m|c)?[jt]sx?$/;
 const isModuleFile = (path: string) => MODULE_EXT.test(path);
 const isCssFile = (path: string) => /\.css$/.test(path);
 
+/**
+ * Classic worker scripts, served untransformed.
+ *
+ * How a file is LOADED decides what it may contain, and the only consumer of a
+ * `*.worker.js` is `new Worker(url)` — a CLASSIC script, which cannot contain
+ * `import`/`export`. The default transform wraps every served script in ESM (a
+ * CJS-interop shim for a UMD bundle, or at minimum an `import { … } from
+ * "…/~deps/~globals.js"` line for its free globals), which such a worker cannot
+ * parse. The resulting `SyntaxError` is delivered asynchronously to the worker's
+ * `onerror` and nowhere else — not as a rejection, not on the page — so a caller
+ * that does not listen for it simply hangs forever with no error anywhere
+ * (`@duckdb/duckdb-wasm` + `@statewalker/db-duckdb-browser`, statewalker/umbrella#40).
+ * An ESM wrap can therefore never be what the caller of such a file wants.
+ *
+ * The filename is the signal because it is the only one there is: the server sees
+ * one file at a time, the loading site (`new Worker(url)`) is in someone else's
+ * code, and the CONTENT of a classic worker bundle is indistinguishable from any
+ * other UMD/IIFE bundle — which the transform exists to wrap. `.worker.js` is the
+ * convention the bundlers that emit these files use.
+ *
+ * Anchored at the end on purpose, and narrow to `.js`: a path that merely CONTAINS
+ * `.worker.js` is a different file. `*.worker.js.map` is a source map and keeps
+ * being served as JSON; `*.worker.jsx`/`.ts` are authored sources that have to be
+ * compiled before anything can load them at all.
+ *
+ * There is deliberately no opt-out: no caller in this ecosystem imports a
+ * `*.worker.js` as a module (checked across the sibling repos), and `?raw` already
+ * covers the other direction. If one ever appears, `?module` — the existing
+ * "serve this as a module" switch, used today for `.json` and `.css` — is where it
+ * belongs, rather than a new option invented ahead of its caller.
+ */
+const WORKER_SCRIPT = /\.worker\.js$/;
+
 const CONTENT_TYPES: Record<string, string> = {
   json: "application/json",
   md: "text/markdown",
@@ -41,6 +74,11 @@ const CONTENT_TYPES: Record<string, string> = {
   wasm: "application/wasm",
   map: "application/json",
   txt: "text/plain",
+  // Needed by the untransformed paths (`?raw`, `*.worker.js`); the transformed
+  // path sets `text/javascript` itself.
+  js: "text/javascript",
+  mjs: "text/javascript",
+  cjs: "text/javascript",
   // IANA-registered `font/*` types; superseded the old `application/font-woff` forms.
   woff2: "font/woff2",
   woff: "font/woff",
@@ -150,13 +188,18 @@ export function newModuleServer(options: ModuleServerOptions): ModuleServer {
     return (await preprocessModule(id, ctx)).code;
   }
 
-  /** Serve a file's raw bytes (non-module resources, or `?raw`). */
-  async function serveRaw(id: string, asOctet: boolean): Promise<Response> {
+  /** Serve a file's raw bytes (non-module resources, `*.worker.js`, or `?raw`).
+   *  The type comes from the extension on every one of those paths: `?raw` means
+   *  "untransformed", not "of unknown type", and a classic worker script needs a
+   *  JavaScript MIME type — the spec asks for one, and Chromium's tolerance of
+   *  `application/octet-stream` is not something another engine owes us.
+   *  An extension the map does not know still falls back to octet-stream. */
+  async function serveRaw(id: string): Promise<Response> {
     const bytes = await rawBytes(id, ctx);
     if (!bytes) return new Response(null, { status: 404 });
     return new Response(bytes as BodyInit, {
       status: 200,
-      headers: { "content-type": asOctet ? "application/octet-stream" : contentType(id) },
+      headers: { "content-type": contentType(id) },
     });
   }
 
@@ -221,9 +264,13 @@ export function newModuleServer(options: ModuleServerOptions): ModuleServer {
     const url = new URL(request.url);
     const id = idFromPath(url.pathname);
     try {
-      // `?raw` → octet-stream; `?module` on a `.json` → ESM wrapper; non-module
-      // files (json/md/css/…) → raw + guessed type.
-      if (url.searchParams.has("raw")) return await serveRaw(id, true);
+      // `?raw` → untransformed bytes; `*.worker.js` → untransformed bytes too (see
+      // `WORKER_SCRIPT`), ahead of the transform/cache lookup so a body that some
+      // earlier walk transformed into the cache can never be served to a classic
+      // worker; `?module` on a `.json` → ESM wrapper; non-module files
+      // (json/md/css/…) → raw + guessed type.
+      if (url.searchParams.has("raw")) return await serveRaw(id);
+      if (WORKER_SCRIPT.test(id)) return await serveRaw(id);
       if (url.searchParams.has("module") && id.endsWith(".json")) {
         const code = await serveJsonModule(id, ctx);
         if (code === undefined) return new Response(null, { status: 404 });
@@ -253,7 +300,7 @@ export function newModuleServer(options: ModuleServerOptions): ModuleServer {
           headers: { "content-type": "text/javascript" },
         });
       }
-      if (!isModuleFile(id)) return await serveRaw(id, false);
+      if (!isModuleFile(id)) return await serveRaw(id);
       // module files → transform to ESM. `~deps` proxies are pre-generated into
       // `/t/{target}`; a missing one has no `/raw/` to transform → 404 (never
       // routed through transformAndCache).
