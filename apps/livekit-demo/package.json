@@ -15,16 +15,16 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@statewalker/webrun-http-streams": "workspace:*",
+    "@statewalker/webrun-http-streams": "catalog:",
     "@statewalker/webrun-site-builder": "workspace:*",
     "@statewalker/webrun-site-host": "workspace:*",
-    "@statewalker/webrun-streams": "workspace:*",
-    "@statewalker/webrun-streams-livekit": "workspace:*",
-    "livekit-client": "^2.18.3",
-    "livekit-server-sdk": "^2.10.0"
+    "@statewalker/webrun-streams": "catalog:",
+    "@statewalker/webrun-streams-livekit": "catalog:",
+    "livekit-client": "catalog:",
+    "livekit-server-sdk": "catalog:"
   },
   "devDependencies": {
-    "@statewalker/webrun-http-browser": "workspace:*",
+    "@statewalker/webrun-http-browser": "catalog:",
     "@types/node": "catalog:",
     "tsx": "catalog:",
     "typescript": "catalog:",

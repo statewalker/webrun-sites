@@ -35,7 +35,7 @@
     "prepublishOnly": "pnpm run build"
   },
   "peerDependencies": {
-    "@statewalker/webrun-files": "^0.9.0 || ^0.10.0"
+    "@statewalker/webrun-files": "catalog:peers"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",

@@ -29,7 +29,7 @@
   "dependencies": {
     "@statewalker/webrun-files": "catalog:",
     "@statewalker/webrun-modules": "workspace:*",
-    "tailwindcss": "4.3.3"
+    "tailwindcss": "catalog:"
   },
   "devDependencies": {
     "@statewalker/webrun-files-mem": "catalog:",

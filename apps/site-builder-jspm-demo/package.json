@@ -15,7 +15,7 @@
   "dependencies": {
     "@jspm/generator": "catalog:",
     "@statewalker/webrun-files-mem": "catalog:",
-    "@statewalker/webrun-http-browser": "workspace:*",
+    "@statewalker/webrun-http-browser": "catalog:",
     "@statewalker/webrun-site-builder": "workspace:*",
     "@statewalker/webrun-site-host": "workspace:*",
     "es-module-lexer": "catalog:",
