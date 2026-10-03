@@ -4,53 +4,53 @@ packages:
   - "tools/*"
 
 catalog:
-  "@chainsafe/libp2p-noise": 17.0.0
-  "@chainsafe/libp2p-yamux": 8.0.1
-  "@changesets/cli": "^2.29.8"
+  "@chainsafe/libp2p-noise": ^17.0.0
+  "@chainsafe/libp2p-yamux": ^8.0.1
+  "@changesets/cli": "^2.31.1"
   "@jspm/core": "^2.1.0"
-  "@libp2p/circuit-relay-v2": 4.2.11
-  "@libp2p/identify": 4.1.12
-  "@libp2p/interface": 3.2.5
-  "@libp2p/peer-id": 6.0.14
-  "@libp2p/webrtc": 6.0.29
-  "@libp2p/websockets": 10.1.19
-  "@multiformats/multiaddr": 13.0.3
+  "@libp2p/circuit-relay-v2": ^4.2.13
+  "@libp2p/identify": ^4.1.14
+  "@libp2p/interface": ^3.3.0
+  "@libp2p/peer-id": ^6.0.15
+  "@libp2p/webrtc": ^6.0.33
+  "@libp2p/websockets": ^10.1.21
+  "@multiformats/multiaddr": ^13.0.3
   "@statewalker/webrun-http-browser": "^0.6.0"
   "@statewalker/webrun-http-streams": "^0.2.2"
   "@statewalker/webrun-streams": "^0.2.0"
   "@statewalker/webrun-streams-libp2p": "^0.1.2"
   "@statewalker/webrun-streams-livekit": "^0.2.0"
-  "@types/semver": "^7.5.8"
-  "acorn": "^8.12.1"
+  "@types/semver": "^7.8.0"
+  "acorn": "^8.18.0"
   "acorn-globals": "^7.0.1"
-  "cjs-module-lexer": "^1.4.1"
-  "fflate": "^0.8.2"
-  "libp2p": 3.3.8
-  "lightningcss-wasm": "^1.27.0"
-  "livekit-client": "^2.18.3"
-  "livekit-server-sdk": "^2.10.0"
-  "npm-package-arg": "^12.0.0"
-  "playwright": 1.58.0
+  "cjs-module-lexer": "^1.4.3"
+  "fflate": "^0.8.3"
+  "libp2p": ^3.3.11
+  "lightningcss-wasm": "^1.33.0"
+  "livekit-client": "^2.22.3"
+  "livekit-server-sdk": "^2.19.1"
+  "npm-package-arg": "^12.0.2"
+  "playwright": ^1.63.0
   "resolve.exports": "^2.0.3"
-  "semver": "^7.6.3"
-  "tailwindcss": 4.3.3
-  es-module-lexer: ^2.3.1
-  vite: ^8.2.1
+  "semver": "^7.8.5"
+  "tailwindcss": ^4.3.3
+  es-module-lexer: ^2.3.2
+  vite: ^8.3.2
   "@statewalker/webrun-files": "^0.10.0"
   "@statewalker/webrun-files-mem": "^0.10.0"
   "@statewalker/webrun-files-node": "^0.10.0"
-  "@biomejs/biome": ^2.5.8
+  "@biomejs/biome": ^2.5.15
   "@jspm/generator": ^2.16.3
-  "@types/node": ^26.2.0
-  "@vitest/coverage-v8": ^4.1.10
+  "@types/node": ^26.6.4
+  "@vitest/coverage-v8": ^4.1.11
   rimraf: ^6.1.3
-  rolldown: ^1.2.4
+  rolldown: ^1.2.12
   sucrase: ^3.35.1
   tsdown: ^0.22.14
-  tsx: ^4.23.12
-  turbo: ^2.10.9
+  tsx: ^4.23.15
+  turbo: ^2.11.7
   typescript: ^7.0.2
-  vitest: ^4.1.10
+  vitest: ^4.1.11
 
 catalogs:
   peers:
