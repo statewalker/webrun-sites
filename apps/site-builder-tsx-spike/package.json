@@ -13,8 +13,8 @@
   "dependencies": {
     "@statewalker/webrun-files-mem": "catalog:",
     "@statewalker/webrun-http-browser": "catalog:",
-    "@statewalker/webrun-site-builder": "workspace:*",
-    "@statewalker/webrun-site-host": "workspace:*",
+    "@statewalker/webrun-site-builder": "workspace:^",
+    "@statewalker/webrun-site-host": "workspace:^",
     "sucrase": "catalog:"
   },
   "devDependencies": {

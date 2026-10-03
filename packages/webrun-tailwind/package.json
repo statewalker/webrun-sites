@@ -28,7 +28,7 @@
   },
   "dependencies": {
     "@statewalker/webrun-files": "catalog:",
-    "@statewalker/webrun-modules": "workspace:*",
+    "@statewalker/webrun-modules": "workspace:^",
     "tailwindcss": "catalog:"
   },
   "devDependencies": {

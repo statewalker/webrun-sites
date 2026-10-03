@@ -37,7 +37,7 @@
   "dependencies": {
     "@statewalker/webrun-files-mem": "catalog:",
     "@statewalker/webrun-http-browser": "catalog:",
-    "@statewalker/webrun-site-builder": "workspace:*"
+    "@statewalker/webrun-site-builder": "workspace:^"
   },
   "peerDependencies": {
     "@statewalker/webrun-files": "catalog:peers"

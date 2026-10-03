@@ -37,11 +37,11 @@
     "format": "biome format --write ."
   },
   "dependencies": {
-    "@statewalker/webrun-builder": "workspace:*",
-    "@statewalker/webrun-dataflow": "workspace:*",
+    "@statewalker/webrun-builder": "workspace:^",
+    "@statewalker/webrun-dataflow": "workspace:^",
     "@statewalker/webrun-files": "catalog:",
-    "@statewalker/webrun-modules": "workspace:*",
-    "@statewalker/webrun-tailwind": "workspace:*"
+    "@statewalker/webrun-modules": "workspace:^",
+    "@statewalker/webrun-tailwind": "workspace:^"
   },
   "devDependencies": {
     "@statewalker/webrun-files-mem": "catalog:",

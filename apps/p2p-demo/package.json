@@ -27,8 +27,8 @@
     "@libp2p/websockets": "catalog:",
     "@multiformats/multiaddr": "catalog:",
     "@statewalker/webrun-http-streams": "catalog:",
-    "@statewalker/webrun-site-builder": "workspace:*",
-    "@statewalker/webrun-site-host": "workspace:*",
+    "@statewalker/webrun-site-builder": "workspace:^",
+    "@statewalker/webrun-site-host": "workspace:^",
     "@statewalker/webrun-streams": "catalog:",
     "@statewalker/webrun-streams-libp2p": "catalog:",
     "libp2p": "catalog:"
