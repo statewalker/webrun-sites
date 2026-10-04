@@ -9,7 +9,7 @@
       h1 { margin-top: 0; }
       code, pre { background: #f4f4f5; padding: 0.1rem 0.3rem; border-radius: 0.2rem; }
       .row { margin: 0.75rem 0; }
-      .row label { display: inline-block; min-width: 8rem; font-weight: 600; }
+      .row .label { display: inline-block; min-width: 8rem; font-weight: 600; }
       button { padding: 0.25rem 0.6rem; cursor: pointer; }
       #status { font-family: monospace; white-space: pre-wrap; background: #f4f4f5; padding: 0.5rem; min-height: 4rem; }
     </style>
@@ -28,15 +28,15 @@
     </p>
 
     <div class="row">
-      <label>identity:</label>
+      <span class="label">identity:</span>
       <code id="identity">site-server</code>
     </div>
     <div class="row">
-      <label>room:</label>
+      <span class="label">room:</span>
       <code id="room">(initialising…)</code>
     </div>
     <div class="row">
-      <label>status:</label>
+      <span class="label">status:</span>
       <div id="status">starting up…</div>
     </div>
 

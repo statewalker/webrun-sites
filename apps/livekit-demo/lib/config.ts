@@ -8,11 +8,9 @@
  * For production you'd inject the API key + secret as env vars and never
  * ship them to the browser.
  */
-export const LIVEKIT_URL =
-  import.meta.env.VITE_LIVEKIT_URL ?? "ws://localhost:7880";
+export const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL ?? "ws://localhost:7880";
 
-export const TOKEN_SERVICE_URL =
-  import.meta.env.VITE_TOKEN_SERVICE_URL ?? "http://localhost:9091";
+export const TOKEN_SERVICE_URL = import.meta.env.VITE_TOKEN_SERVICE_URL ?? "http://localhost:9091";
 
 /** Room both peers join. Hard-coded for the demo. */
 export const DEMO_ROOM = "p2p-demo-room";

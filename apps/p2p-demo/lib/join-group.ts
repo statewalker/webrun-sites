@@ -1,8 +1,8 @@
 import { peerIdFromString } from "@libp2p/peer-id";
-import { multiaddr, type Multiaddr } from "@multiformats/multiaddr";
+import { type Multiaddr, multiaddr } from "@multiformats/multiaddr";
 import type { Libp2p } from "libp2p";
+import type { PeerEntry, Service, ServiceAnnouncement } from "./announcement.js";
 import { discoveryClient } from "./discovery.js";
-import { type PeerEntry, type Service, type ServiceAnnouncement } from "./announcement.js";
 import { applyAnnouncement, evictStale, type GroupState } from "./group-state.js";
 
 export interface GroupHandle {
@@ -89,7 +89,7 @@ export async function joinGroup({ node, groupId, relay }: JoinGroupParams): Prom
   const preWarmPeers = (): void => {
     for (const peerId of state.keys()) {
       if (peerId === selfPeerId || warming.has(peerId)) continue;
-      let pid;
+      let pid: ReturnType<typeof peerIdFromString>;
       try {
         pid = peerIdFromString(peerId);
       } catch {

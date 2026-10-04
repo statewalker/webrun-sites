@@ -1,4 +1,4 @@
-import { parse, type Program } from "acorn";
+import { type Program, parse } from "acorn";
 import type { SourceFormat } from "../types.js";
 import { toJs } from "./to-js.js";
 
@@ -15,7 +15,11 @@ export interface ParsedSource {
  * `node.loc.start.line` is the line in the original source. Meant for static
  * analysis of values (calls, literals, object shapes), not of types.
  */
-export function parseSource(source: string, format: SourceFormat = "ts", path?: string): ParsedSource {
+export function parseSource(
+  source: string,
+  format: SourceFormat = "ts",
+  path?: string,
+): ParsedSource {
   const js = toJs(source, format, path);
   const ast = parse(js, { ecmaVersion: "latest", sourceType: "module", locations: true });
   return { js, ast };

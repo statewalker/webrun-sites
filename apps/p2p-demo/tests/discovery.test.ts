@@ -56,9 +56,7 @@ describe("relay-mediated discovery", () => {
 
     await discoveryClient(a, addr, "g1").announce(ann(a, "alpha"));
     const cb = discoveryClient(b, addr, "g1");
-    expect((await cb.announce(ann(b, "beta"))).map((x) => x.peerId)).toContain(
-      a.peerId.toString(),
-    );
+    expect((await cb.announce(ann(b, "beta"))).map((x) => x.peerId)).toContain(a.peerId.toString());
 
     await new Promise((r) => setTimeout(r, 400));
     expect((await cb.announce(ann(b, "beta"))).map((x) => x.peerId)).not.toContain(

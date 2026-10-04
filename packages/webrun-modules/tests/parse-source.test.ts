@@ -16,7 +16,8 @@ describe("parseSource", () => {
     const decl = ast.body.find(
       (n): n is AcornAst.ExportNamedDeclaration => n.type === "ExportNamedDeclaration",
     );
-    const init = (decl?.declaration as AcornAst.VariableDeclaration).declarations[0]?.init;
+    const init = (decl?.declaration as AcornAst.VariableDeclaration | undefined)?.declarations[0]
+      ?.init;
     expect(init?.type).toBe("CallExpression");
     expect(init?.loc?.start.line).toBe(4);
     const arg = (init as AcornAst.CallExpression).arguments[0] as AcornAst.ObjectExpression;
