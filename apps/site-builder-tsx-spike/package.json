@@ -4,6 +4,15 @@
   "private": true,
   "type": "module",
   "description": "Spike: HostedSiteBuilder serving .tsx source transpiled on-the-fly via sucrase + ServeFilesOptions.transform filter",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/statewalker/webrun-sites.git",
+    "directory": "apps/site-builder-tsx-spike"
+  },
+  "bugs": {
+    "url": "https://github.com/statewalker/webrun-sites/issues"
+  },
+  "homepage": "https://github.com/statewalker/webrun-sites/tree/main/apps/site-builder-tsx-spike#readme",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
