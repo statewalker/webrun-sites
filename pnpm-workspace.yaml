@@ -18,7 +18,7 @@ catalog:
   "@statewalker/webrun-http-browser": "^0.6.0"
   "@statewalker/webrun-http-streams": "^0.2.2"
   "@statewalker/webrun-streams": "^0.2.0"
-  "@statewalker/webrun-streams-libp2p": "^0.1.2"
+  "@statewalker/webrun-streams-libp2p": "^0.1.6"
   "@statewalker/webrun-streams-livekit": "^0.2.0"
   "@types/semver": "^7.8.0"
   "acorn": "^8.18.0"
