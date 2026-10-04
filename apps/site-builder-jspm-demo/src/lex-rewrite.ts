@@ -10,14 +10,14 @@ export { init };
  * Return the deduplicated list of static import specifiers (and dynamic
  * `import("…")` specifiers that are a plain string literal) discovered in
  * the given module source. Dynamic imports with non-string arguments are
- * skipped — their `n` field is undefined and we can't statically rewrite
- * them anyway.
+ * skipped — their `specifier` is undefined (null for `import.meta`) and we
+ * can't statically rewrite them anyway.
  */
 export function discoverSpecifiers(code: string): string[] {
   const [imports] = parse(code);
   const out = new Set<string>();
   for (const imp of imports) {
-    if (imp.n !== undefined) out.add(imp.n);
+    if (imp.specifier != null) out.add(imp.specifier);
   }
   return [...out];
 }
@@ -33,17 +33,17 @@ export function rewriteImports(code: string, mapSpecifier: (raw: string) => stri
   let out = code;
   for (let i = imports.length - 1; i >= 0; i--) {
     const imp = imports[i];
-    if (imp.n === undefined) continue;
-    const replacement = mapSpecifier(imp.n);
-    if (replacement === imp.n) continue;
-    // For dynamic imports the lexer's s/e bounds include the surrounding
+    if (imp.specifier == null) continue;
+    const replacement = mapSpecifier(imp.specifier);
+    if (replacement === imp.specifier) continue;
+    // For dynamic imports the lexer's start/end bounds include the surrounding
     // string quotes; for static imports they fall between the quotes.
     // Preserve the quote characters around the replacement in the
     // quote-inclusive case so the output remains syntactically valid.
-    const startChar = out.charAt(imp.s);
+    const startChar = out.charAt(imp.start);
     const isQuoted = startChar === '"' || startChar === "'" || startChar === "`";
     const finalRepl = isQuoted ? `${startChar}${replacement}${startChar}` : replacement;
-    out = out.slice(0, imp.s) + finalRepl + out.slice(imp.e);
+    out = out.slice(0, imp.start) + finalRepl + out.slice(imp.end);
   }
   return out;
 }
