@@ -2,7 +2,7 @@
   "name": "@statewalker/webrun-transform-monorepo",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@9.15.0",
+  "packageManager": "pnpm@10.16.1",
   "description": "Incremental resource transformation — build engine, module resolution/serving, and transforms",
   "homepage": "https://github.com/statewalker/webrun-transform",
   "author": {
@@ -29,7 +29,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
-    "@changesets/cli": "^2.29.8",
+    "@changesets/cli": "catalog:",
     "@types/node": "catalog:",
     "@vitest/coverage-v8": "catalog:",
     "tsx": "catalog:",

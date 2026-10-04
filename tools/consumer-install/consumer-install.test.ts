@@ -21,6 +21,13 @@ export const PACKAGES: ConsumerTarget[] = [
   { name: "@statewalker/webrun-modules", dir: "webrun-modules", subpaths: ["."] },
   { name: "@statewalker/webrun-modules-build", dir: "webrun-modules-build", subpaths: ["."] },
   { name: "@statewalker/webrun-tailwind", dir: "webrun-tailwind", subpaths: ["."] },
+  { name: "@statewalker/webrun-site-builder", dir: "webrun-site-builder", subpaths: ["."] },
+  {
+    name: "@statewalker/webrun-site-host",
+    dir: "webrun-site-host",
+    subpaths: ["."],
+    browserOnly: ["."], // registers a ServiceWorker; cannot import under Node
+  },
 ];
 
 const REPO = resolve(import.meta.dirname, "../..");
