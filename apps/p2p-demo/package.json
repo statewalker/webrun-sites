@@ -4,6 +4,15 @@
   "private": true,
   "type": "module",
   "description": "Merged p2p demo: Node libp2p Circuit Relay v2 + browser server page + browser client page, all bootable from one script.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/statewalker/webrun-sites.git",
+    "directory": "apps/p2p-demo"
+  },
+  "bugs": {
+    "url": "https://github.com/statewalker/webrun-sites/issues"
+  },
+  "homepage": "https://github.com/statewalker/webrun-sites/tree/main/apps/p2p-demo#readme",
   "scripts": {
     "start": "bash scripts/start.sh",
     "relay": "tsx relay/server.ts",

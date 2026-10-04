@@ -3,6 +3,15 @@
   "version": "0.2.0",
   "type": "module",
   "description": "Build-only Tailwind CSS transform: a RegisteredTransform that generates the generic all-classes Tailwind stylesheet (v4) for a `tailwind-css` input and hands it to the shared CSS transform.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/statewalker/webrun-sites.git",
+    "directory": "packages/webrun-tailwind"
+  },
+  "bugs": {
+    "url": "https://github.com/statewalker/webrun-sites/issues"
+  },
+  "homepage": "https://github.com/statewalker/webrun-sites/tree/main/packages/webrun-tailwind#readme",
   "license": "MIT",
   "exports": {
     ".": {

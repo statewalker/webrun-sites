@@ -4,6 +4,15 @@
   "private": true,
   "type": "module",
   "description": "Demo: bare-specifier imports in client and server source resolved in-browser via @jspm/generator and rewritten to a same-origin /external/ mount with relative URLs.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/statewalker/webrun-sites.git",
+    "directory": "apps/site-builder-jspm-demo"
+  },
+  "bugs": {
+    "url": "https://github.com/statewalker/webrun-sites/issues"
+  },
+  "homepage": "https://github.com/statewalker/webrun-sites/tree/main/apps/site-builder-jspm-demo#readme",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

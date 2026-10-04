@@ -4,6 +4,15 @@
   "private": true,
   "type": "module",
   "description": "Cross-app HTTP+SSE demo using LiveKit as the initialisation and transport layer. Mirror of p2p-demo with a LiveKit room replacing the libp2p relay + WebRTC link.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/statewalker/webrun-sites.git",
+    "directory": "apps/livekit-demo"
+  },
+  "bugs": {
+    "url": "https://github.com/statewalker/webrun-sites/issues"
+  },
+  "homepage": "https://github.com/statewalker/webrun-sites/tree/main/apps/livekit-demo#readme",
   "scripts": {
     "start": "bash scripts/start.sh",
     "token-service": "tsx token-service/server.ts",

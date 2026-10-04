@@ -4,7 +4,10 @@
   "private": false,
   "type": "module",
   "description": "Isomorphic module/dependency server: resolve + download + transform npm and authored TS/JS into browser-runnable ESM served from a local FilesApi cache, with no runtime CDN dependency",
-  "homepage": "https://github.com/statewalker/webrun-files/tree/main/packages/webrun-modules#readme",
+  "bugs": {
+    "url": "https://github.com/statewalker/webrun-sites/issues"
+  },
+  "homepage": "https://github.com/statewalker/webrun-sites/tree/main/packages/webrun-modules#readme",
   "author": {
     "name": "Mikhail Kotelnikov",
     "email": "mikhail.kotelnikov@gmail.com"
@@ -12,7 +15,8 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/statewalker/webrun-files.git"
+    "url": "git+https://github.com/statewalker/webrun-sites.git",
+    "directory": "packages/webrun-modules"
   },
   "main": "./dist/index.js",
   "module": "./dist/index.js",

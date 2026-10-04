@@ -4,7 +4,10 @@
   "private": false,
   "type": "module",
   "description": "Builder for a composable (Request) => Response site: static files (FilesApi), dynamic endpoints, and auth hooks",
-  "homepage": "https://github.com/statewalker/webrun-wire",
+  "bugs": {
+    "url": "https://github.com/statewalker/webrun-sites/issues"
+  },
+  "homepage": "https://github.com/statewalker/webrun-sites/tree/main/packages/webrun-site-builder#readme",
   "author": {
     "name": "Mikhail Kotelnikov",
     "email": "mikhail.kotelnikov@gmail.com"
@@ -12,7 +15,8 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git@github.com:statewalker/webrun-wire.git"
+    "url": "git+https://github.com/statewalker/webrun-sites.git",
+    "directory": "packages/webrun-site-builder"
   },
   "main": "./dist/index.js",
   "module": "./dist/index.js",

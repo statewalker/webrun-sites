@@ -4,7 +4,10 @@
   "type": "module",
   "packageManager": "pnpm@10.16.1",
   "description": "Incremental resource transformation — build engine, module resolution/serving, and transforms",
-  "homepage": "https://github.com/statewalker/webrun-transform",
+  "bugs": {
+    "url": "https://github.com/statewalker/webrun-sites/issues"
+  },
+  "homepage": "https://github.com/statewalker/webrun-sites#readme",
   "author": {
     "name": "Mikhail Kotelnikov",
     "email": "mikhail.kotelnikov@gmail.com"
@@ -12,7 +15,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/statewalker/webrun-transform.git"
+    "url": "git+https://github.com/statewalker/webrun-sites.git"
   },
   "scripts": {
     "build": "pnpm -r run build",

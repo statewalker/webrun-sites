@@ -4,6 +4,15 @@
   "private": true,
   "type": "module",
   "description": "Vite + TypeScript demo: webrun-site-builder mounted on a same-origin webrun-http-browser ServiceWorker",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/statewalker/webrun-sites.git",
+    "directory": "apps/site-builder-demo"
+  },
+  "bugs": {
+    "url": "https://github.com/statewalker/webrun-sites/issues"
+  },
+  "homepage": "https://github.com/statewalker/webrun-sites/tree/main/apps/site-builder-demo#readme",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
