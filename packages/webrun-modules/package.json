@@ -46,7 +46,6 @@
     "acorn": "catalog:",
     "acorn-globals": "catalog:",
     "sucrase": "catalog:",
-    "@jspm/generator": "catalog:",
     "cjs-module-lexer": "catalog:",
     "resolve.exports": "catalog:",
     "npm-package-arg": "catalog:",
