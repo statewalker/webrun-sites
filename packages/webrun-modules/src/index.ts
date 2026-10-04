@@ -32,6 +32,11 @@ export type { NpmRegistrySourceOptions } from "./sources/npm-registry-source.js"
 export { npmRegistrySource } from "./sources/npm-registry-source.js";
 export { untarTgz } from "./sources/untar.js";
 export { analyze } from "./transform/analyze.js";
+export type { ParsedSource } from "./transform/parse-source.js";
+export { parseSource } from "./transform/parse-source.js";
+export { toJs } from "./transform/to-js.js";
+/** acorn's ESTree node types, for code that walks a `parseSource` tree. */
+export type * as AcornAst from "acorn";
 export { newDefaultCssTransform, newLightningCssTransform } from "./transform/css/index.js";
 export {
   detectFormat,
