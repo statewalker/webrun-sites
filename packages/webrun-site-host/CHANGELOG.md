@@ -1,5 +1,15 @@
 # @statewalker/webrun-site-host
 
+## 0.2.4
+
+### Patch Changes
+
+- Release of the changes since the last published version:
+  
+  - files changed: README.md
+- Updated dependencies
+  - @statewalker/webrun-site-builder@0.2.2
+
 ## 0.2.0
 
 ### Minor Changes
