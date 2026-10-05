@@ -1,73 +1,146 @@
 # @statewalker/webrun-tailwind
 
-A **build-only** Tailwind CSS (v4) transform for the `@statewalker/webrun-modules`
-transform registry. Registered on the batch build's context (never the request-time
-server), it turns a `tailwind-css` input into a processed `.css` artifact.
+## What it is
 
-## What it does
+A build-only Tailwind CSS v4 transform for the `@statewalker/webrun-modules`
+transform registry. It turns a project stylesheet that uses Tailwind
+(`@import "tailwindcss"` or `@tailwind` directives) into a processed `.css`
+artifact that contains every Tailwind utility class, styled with the project's
+own theme.
 
-`newTailwindTransform()` returns a `RegisteredTransform` (`inType: "tailwind-css"`,
-`outType: "css"`). On the build context it is registered under the `tailwind-css`
-input type; a project `.css` whose content the core's `detectInputType` sniffs as
-Tailwind (see below) is routed to it instead of the plain CSS transform.
+## Why it exists
 
-Generation is **all-classes and DOM-free**, and it **honors the entry's own
-customizations**:
+Tailwind normally scans the markup for class names and emits only those. The
+modules pipeline has no markup to scan: pages are built from TS/TSX at run time,
+and class names can be computed. This transform therefore emits the whole utility
+set once, and the running markup uses what it needs.
 
-1. The project entry `source` drives `__unstable__loadDesignSystem(…)`, so the
-   project's `@theme` tokens, `@utility`/`@layer` rules, and sibling `@import`s take
-   effect (Tailwind's own bundled CSS resolves via `node:fs`; project `@import`s via
-   `ctx.files`). `@import "tailwindcss"` is prepended when the source uses only the
-   legacy `@tailwind` directives, so the full design system always loads.
-2. `getClassList()` enumerates **every** utility class name (~23k in 4.3.3),
-   including those derived from custom tokens.
-3. `compile(entry).build(classNames)` emits the full utility stylesheet, using the
-   project's theme values.
-4. The result is run through the shared CSS transform (Lightning) for parity.
+Generation is slow and the output is large (about 23,000 classes with Tailwind
+4.3.3), so it runs only in the batch build (`@statewalker/webrun-modules-build`),
+where the result is cached, and never on a request.
 
-No JSX/HTML/DOM content scanning happens — the build emits the whole utility set and
-the running markup selects what it uses.
+## How to use
 
-## Build-only, by design
+### Install
 
-The transform is registered from `@statewalker/webrun-modules-build`'s `build.ts`,
-**not** from the request-time server. The server's default registry has no
-`tailwind-css` entry, so a served Tailwind `.css` falls back (via `coarseBucket`) to
-the plain `css` transform — request-time output stays byte-identical (the
-`webrun-modules` no-drift gate). This package therefore depends on `webrun-files`
-(for its emit writes) and `webrun-modules` (the `RegisteredTransform` contract), and
-pins `tailwindcss` to an exact version.
+```sh
+pnpm add @statewalker/webrun-tailwind
+```
 
-> **Version pin.** `tailwindcss` is pinned directly (`"4.3.3"`) in this package's
-> `package.json`, not via the workspace catalog: the pure-JS
-> `__unstable__loadDesignSystem` surface is version-sensitive, and an exact pin
-> resolves consistently both standalone and inside the aggregating umbrella (whose
-> last-wins catalog merge could otherwise resolve a different Tailwind version).
+Runtime dependencies: `@statewalker/webrun-files`, `@statewalker/webrun-modules`
+and `tailwindcss` (v4). No peer dependencies. Node only: the package reads
+Tailwind's bundled CSS with `node:fs` and locates it with `node:module`.
 
-## Incremental caching
+### One entry point
 
-`tailwindCacheKey(source)` returns the pinned Tailwind version. The build's
-`skipTransform` closure folds it into the per-id content hash for `tailwind-css`
-ids (`hash(version + "\n" + source)`), so an unchanged entry reuses the cached
-(multi-MB) artifact, while a Tailwind version change re-generates even when the
-entry bytes are unchanged. (`TW_CACHE_VER` overrides the version — a test seam.)
+`@statewalker/webrun-tailwind` (ESM, built to `dist/`; TypeScript sources in
+`src/`) exports:
 
-## Sniff (how a `.css` becomes `tailwind-css`)
+| Export | What it is |
+| --- | --- |
+| `newTailwindTransform()` | A `RegisteredTransform` with `inType: "tailwind-css"`, `outType: "css"`. |
+| `generateTailwindCss(source, ctx, entryId)` | Generates the full stylesheet for an entry; the transform calls it. |
+| `tailwindCacheKey(source)` | The version string folded into the build's cache key. |
+| `TAILWIND_VERSION` | `"4.3.3"`, the version the cache key reports. |
 
-The core's `detectInputType` classifies a `.css` as `tailwind-css` when its content
-matches `/^\s*@tailwind\b/m` or `/^\s*@import\s+["']tailwindcss["']/m`. Known edges:
+### Register it on a transform registry
 
-- **Comment/subpath sniff edges.** A line-leading `@tailwind`/`@import "tailwindcss"`
-  inside a block comment still matches (build-time only; the server is unaffected via
-  the fallback), and a subpath-only entry (`@import "tailwindcss/utilities"`) is not
-  detected as Tailwind. Keep the Tailwind directive as an effective top-level rule.
-- **Sibling double-emit.** A sibling `@import "./tokens.css"` in the entry is both
-  inlined into the generated stylesheet (authoritative) and, because the walk reaches
-  it independently, emitted as its own `/~/tokens.css` (harmless, unreferenced).
+`@statewalker/webrun-modules-build` does this for you. A custom driver that builds
+its own `PreprocessContext` registers it like this:
 
-## Note
+```ts
+import { newDefaultTransformRegistry } from "@statewalker/webrun-modules";
+import { newTailwindTransform } from "@statewalker/webrun-tailwind";
 
-`preprocessModule` requires `ctx.transforms` to be set (both in-repo drivers set it).
-External drivers constructing a `PreprocessContext` directly must attach a registry
-(`newDefaultTransformRegistry()`), then `register(newTailwindTransform())` if Tailwind
-is wanted.
+const transforms = newDefaultTransformRegistry();
+transforms.register(newTailwindTransform());
+// ctx.transforms = transforms
+```
+
+`preprocessModule` requires `ctx.transforms` to be set; without the Tailwind
+entry, a Tailwind stylesheet is handled by the plain CSS transform.
+
+## Examples
+
+### `newTailwindTransform`: a project entry with a custom theme
+
+Project file `/styles.css`:
+
+```css
+@import "tailwindcss";
+
+@theme {
+  --color-brand: #0a7;
+}
+```
+
+When the build reaches `/styles.css`, `detectInputType` classifies it as
+`tailwind-css` and the transform writes the generated stylesheet, including
+utilities such as `bg-brand` and `text-brand`, to the cache at the entry's
+emitted path, plus `<path>.exports.json`.
+
+### `tailwindCacheKey`: version-keyed caching
+
+```ts
+import { tailwindCacheKey } from "@statewalker/webrun-tailwind";
+
+tailwindCacheKey(source); // → "4.3.3" (or $TW_CACHE_VER when set)
+```
+
+The build hashes `tailwindCacheKey(source) + "\n" + source`, so an unchanged entry
+reuses the cached multi-megabyte artifact.
+
+## Internals
+
+### Generation honors the entry's customizations
+
+1. The entry source drives `__unstable__loadDesignSystem(…)`, so its `@theme`
+   tokens, `@utility`/`@layer` rules and sibling `@import`s take effect.
+   Tailwind's own CSS is read with `node:fs`; project `@import`s are read through
+   `ctx.files`. `@import "tailwindcss"` is prepended when the source uses only
+   `@tailwind` directives, because those alone load a partial utility set.
+2. `getClassList()` enumerates every utility class name, including ones derived
+   from custom tokens.
+3. `compile(entry).build(classNames)` emits the stylesheet.
+4. The result goes through the shared CSS transform (Lightning CSS), so it is
+   processed the same way as any other stylesheet.
+
+### Why the request-time server never runs it
+
+The server's default registry has no `tailwind-css` entry. A Tailwind stylesheet
+served at request time falls back (via `coarseBucket`) to the plain `css`
+transform, so the server's output does not depend on whether this package is
+installed.
+
+### How a `.css` file is detected as Tailwind
+
+`detectInputType` in `@statewalker/webrun-modules` classifies a `.css` as
+`tailwind-css` when its content matches `/^\s*@tailwind\b/m` or
+`/^\s*@import\s+["']tailwindcss["']/m`.
+
+### What will surprise you
+
+- **Subpath imports are not detected.** An entry with only
+  `@import "tailwindcss/utilities"` is treated as plain CSS. Keep
+  `@import "tailwindcss"` as a top-level rule.
+- **Comments can trigger detection.** A line starting with `@tailwind` or
+  `@import "tailwindcss"` inside a block comment still matches.
+- **A sibling import is emitted twice.** `@import "./tokens.css"` in the entry is
+  inlined into the generated stylesheet, and the build also emits `/~/tokens.css`
+  on its own (unreferenced, harmless).
+- **The cache key can lag the installed Tailwind.** `TAILWIND_VERSION` is the
+  constant `"4.3.3"`, while the dependency range is `^4.3.3`. After an upgrade to a
+  later 4.x, the cache key does not change, so cached stylesheets are not
+  regenerated until the constant is updated (or `TW_CACHE_VER` is set).
+- **Missing `ctx.files` fails project imports** with
+  `webrun-tailwind: ctx.files required to resolve project @import`.
+
+### Dependencies
+
+`tailwindcss` (generation), `@statewalker/webrun-modules` (the
+`RegisteredTransform` and `PreprocessContext` contract), `@statewalker/webrun-files`
+(`readText`/`writeText` for project imports and output).
+
+## License
+
+MIT

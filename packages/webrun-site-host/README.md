@@ -1,23 +1,63 @@
 # @statewalker/webrun-site-host
 
-Browser-side host for a `SiteHandler`. Registers a same-origin ServiceWorker,
-mounts the handler under a virtual path, and rewrites incoming requests to
-site-relative form before dispatching.
+## What it is
 
-This package owns *where* a site runs (browser + SW). It does NOT own *what*
-the site does — endpoints, files, auth, and routing live in
-[`@statewalker/webrun-site-builder`](../webrun-site-builder) (or anywhere
-else that produces a `SiteHandler = (Request) => Promise<Response>`).
+A browser-side host for a `SiteHandler = (Request) => Promise<Response>`.
+`HostedSiteBuilder` registers a same-origin ServiceWorker, mounts the handler
+under `<origin>/<siteKey>/`, rewrites each intercepted request to site-relative
+form and passes it to the handler. Anything inside the browser that fetches from
+that URL — an iframe, `fetch`, `import()` — is answered by your handler, with no
+server.
 
-## Getting started
+## Why it exists
+
+A `SiteHandler` (usually built with `@statewalker/webrun-site-builder`) says
+*what* a site does. Running it in a browser needs ServiceWorker registration,
+activation, URL prefixing and request rewriting, which are the same for every
+site. This package does that part in one call, so the site definition stays free
+of host code and the same handler also runs under Node, Deno, Bun, Workers or a
+`DuplexSiteBuilder` (`@statewalker/webrun-http-streams`).
+
+## How to use
+
+### Install
+
+```sh
+pnpm add @statewalker/webrun-site-host @statewalker/webrun-files
+```
+
+`@statewalker/webrun-files` is a **peer dependency** (`^0.9.0 || ^0.10.0`).
+Runtime dependencies: `@statewalker/webrun-site-builder`,
+`@statewalker/webrun-http-browser` (the ServiceWorker adapter) and
+`@statewalker/webrun-files-mem`.
+
+One entry point, `@statewalker/webrun-site-host` (ESM, built to `dist/`;
+TypeScript sources in `src/`). Browser only: it needs `navigator.serviceWorker`
+and therefore a secure context (`https://` or `localhost`).
+
+### Serve the ServiceWorker script at `/sw-worker.js`
+
+The ServiceWorker runtime ships in `@statewalker/webrun-http-browser` as the
+`./sw-worker` export (`dist/sw-worker.js`). Your app must serve that file at
+`/sw-worker.js` on the page's origin (or at the URL passed to
+`setServiceWorkerUrl`). Serving it from the origin root gives the worker scope
+`/`; the demo apps in this repository do it with a small Vite plugin that also
+sends `Service-Worker-Allowed: /`.
+
+### Host a handler
 
 ```ts
+import { MemFilesApi } from "@statewalker/webrun-files-mem";
 import { SiteBuilder } from "@statewalker/webrun-site-builder";
 import { HostedSiteBuilder } from "@statewalker/webrun-site-host";
 
+const clientFiles = new MemFilesApi({
+  initialFiles: { "/index.html": "<!doctype html><h1>Hello</h1>" },
+});
+
 const handler = new SiteBuilder()
   .setEndpoint("/api/time", () => new Response(new Date().toISOString()))
-  .setFiles("/", clientFiles)
+  .setFiles("/", clientFiles, { directoryIndex: "index.html" })
   .build();
 
 const site = await new HostedSiteBuilder()
@@ -25,55 +65,18 @@ const site = await new HostedSiteBuilder()
   .setHandler(handler)
   .build();
 
-iframe.src = site.baseUrl;
+iframe.src = site.baseUrl; // e.g. https://localhost:5173/demo/
+// later: await site.stop();
 ```
 
-The split is intentional: the same `SiteHandler` works in every host —
-browser + SW via `HostedSiteBuilder`, any `webrun-streams-*` transport via
-[`DuplexSiteBuilder`](../webrun-http-streams), and Node / Deno / Bun /
-Cloudflare Workers directly, since a `SiteHandler` already *is* their handler
-shape. Configuration lives in one place.
-
-## Install
-
-```sh
-npm install @statewalker/webrun-site-host @statewalker/webrun-files
-```
-
-[`@statewalker/webrun-files`](https://github.com/statewalker/webrun-files) is a
-**peer dependency** (`^0.7.0`). Browser-only — it registers a ServiceWorker, so
-a secure context (`https://` or `localhost`) is required.
-
-## Cross-application HTTP (no domains, no certificates)
-
-Because the handler is just a function, you can point it at a remote peer over
-any `webrun-streams-*` transport (WebSocket, WebRTC, libp2p, LiveKit,
-MessagePort, …). The browser-side host doesn't care:
-
-```ts
-import { fetchOverDuplex } from "@statewalker/webrun-http-streams";
-import { connect } from "@statewalker/webrun-streams-ws";
-
-const { call } = await connect({ url: "wss://peer.example" }); // any adapter
-const site = await new HostedSiteBuilder()
-  .setHandler((request) => fetchOverDuplex(call, request))
-  .build();
-
-iframe.src = site.baseUrl;
-// Every fetch inside the iframe is now proxied across the peer connection.
-```
-
-`apps/livekit-demo/client-page/main.ts` and `apps/p2p-demo/client-page/main.ts`
-are both this pattern against a real transport.
-
-## API
+### API
 
 ```ts
 class HostedSiteBuilder {
   constructor(options?: HostedSiteBuilderOptions);
-  setSiteKey(key: string): this;
-  setServiceWorkerUrl(url: string): this;
-  setHandler(handler: SiteHandler): this;
+  setSiteKey(key: string): this;          // default: crypto.randomUUID()
+  setServiceWorkerUrl(url: string): this; // default: /sw-worker.js on the current origin
+  setHandler(handler: SiteHandler): this; // required
   build(): Promise<HostedSite>;
 }
 
@@ -84,41 +87,21 @@ interface HostedSite {
 }
 
 interface HostedSiteBuilderOptions {
-  adapterFactory?: AdapterFactory;
+  adapterFactory?: AdapterFactory; // replaces the ServiceWorker adapter (tests use a fake)
 }
 ```
 
-`build()` throws if `setHandler` was not called. `siteKey` defaults to a
-generated UUID and `serviceWorkerUrl` to `/sw-worker.js`. `adapterFactory` is
-the seam the tests use to inject a fake instead of a real ServiceWorker; it
-also takes `SiteAdapter`, `SiteAdapterRegistration` and `AdapterFactory`, all
-exported.
+Also exported: `newServerRunner`, `resolveFilesSource`, and the types
+`FilesSource`, `SiteAdapter`, `SiteAdapterRegistration` and `AdapterFactory`.
 
-Also exported, for callers that accept "a `FilesApi` or a plain path → content
-map" in their own APIs:
+## Examples
+
+### `newServerRunner`: an endpoint that is a module served by the site itself
 
 ```ts
-type FilesSource = FilesApi | Record<string, string | Uint8Array>;
-function resolveFilesSource(source: FilesSource): Promise<FilesApi>;
-```
+import { SiteBuilder } from "@statewalker/webrun-site-builder";
+import { HostedSiteBuilder, newServerRunner } from "@statewalker/webrun-site-host";
 
-`HostedSiteBuilder` itself never calls it — it hosts a `SiteHandler` and owns
-no file configuration.
-
-Plus a standalone utility for the "endpoint is a JS module dynamically
-imported from the site itself" pattern:
-
-```ts
-export function newServerRunner(
-  modulePath: string,
-  getBaseUrl: () => string,
-  env?: Record<string, unknown>,
-): EndpointHandler;
-```
-
-Use it with `SiteBuilder.setEndpoint`:
-
-```ts
 let getBaseUrl = () => "";
 const handler = new SiteBuilder()
   .setFiles("/server", serverFiles)
@@ -129,48 +112,82 @@ const site = await new HostedSiteBuilder().setHandler(handler).build();
 getBaseUrl = () => site.baseUrl;
 ```
 
-## What `build()` does
+`newServerRunner(modulePath, getBaseUrl, env?)` imports
+`${getBaseUrl()}${modulePath}` on each request and calls its default export with
+`(request, env)`. `env` is the endpoint env, then the runner's `env`, with the
+request's `params` always last. A module without a default export answers
+`500 Module <path> has no default export`.
 
-1. Resolve `siteKey` (generated UUID if not set) and `swUrl` (`/sw-worker.js`
-   if not set).
-2. Construct and start the adapter (`SwHttpAdapter` by default — registers
-   the ServiceWorker and awaits activation).
-3. Register a fetch interceptor under `<origin>/<siteKey>/` that:
-   - Strips the SW prefix from the incoming `Request.url`.
-   - Dispatches to your handler.
-4. Return a `HostedSite` with the resolved `baseUrl` and a `stop()` for
-   teardown.
+### Forward every request to a remote peer
 
-## See also
+Because the handler is a function, it can forward requests over any
+`webrun-streams-*` transport:
 
-- [`@statewalker/webrun-site-builder`](../webrun-site-builder) — produces a
-  `SiteHandler` from endpoints + files + auth + routing.
-- [`@statewalker/webrun-http-streams`](../webrun-http-streams) —
-  `DuplexSiteBuilder`, the sibling host for any `webrun-streams-*` transport,
-  plus `fetchOverDuplex` / `serveFetchOverDuplex`.
-- [`apps/site-builder-demo`](../../apps/site-builder-demo) and
-  [`apps/site-builder-tsx-spike`](../../apps/site-builder-tsx-spike) —
-  runnable examples.
+```ts
+import { fetchOverDuplex } from "@statewalker/webrun-http-streams";
+import { connect } from "@statewalker/webrun-streams-ws";
+import { HostedSiteBuilder } from "@statewalker/webrun-site-host";
 
-## Dependencies
+const { call } = await connect({ url: "wss://peer.example" });
+const site = await new HostedSiteBuilder()
+  .setHandler((request) => fetchOverDuplex(call, request))
+  .build();
+
+iframe.src = site.baseUrl; // every fetch inside the iframe goes to the peer
+```
+
+`apps/livekit-demo/client-page/main.ts` and `apps/p2p-demo/client-page/main.ts`
+use this pattern with LiveKit and libp2p.
+
+### `resolveFilesSource`: accept a `FilesApi` or a plain map
+
+```ts
+import { resolveFilesSource } from "@statewalker/webrun-site-host";
+
+const files = await resolveFilesSource({ "/index.html": "<h1>Hi</h1>" }); // → MemFilesApi
+```
+
+A `FilesApi` is returned as is. `HostedSiteBuilder` itself never calls it; it is
+for callers whose own API accepts either form.
+
+## Internals
+
+### What `build()` does
+
+1. Resolve the site key (`crypto.randomUUID()` if not set) and the ServiceWorker
+   URL (`/sw-worker.js` on the current origin if not set).
+2. Create the adapter (`SwHttpAdapter` from `@statewalker/webrun-http-browser/sw`
+   by default) and start it: it registers the ServiceWorker and waits for it to
+   control the page.
+3. Register a handler under `<siteKey>/` that strips that prefix from
+   `request.url` and calls your handler.
+4. Return `{ siteKey, baseUrl, stop }`. `stop()` removes the registration first,
+   then stops the adapter.
+
+### What will surprise you
+
+- `build()` without `setHandler` throws
+  `HostedSiteBuilder.build: setHandler(handler) must be called before build()`.
+- **Sites on one origin need distinct keys.** The key is the URL prefix of the
+  site.
+- **If `/sw-worker.js` is not served,** ServiceWorker registration fails and
+  `build()` rejects. With a dev server that returns `index.html` for unknown
+  paths, the browser reports that the script has an unsupported MIME type
+  (`text/html`).
+- **Your handler sees `http://site.local/...` URLs.** Requests are rebuilt with
+  that origin and the site-relative path. Use `site.baseUrl` when you need the
+  real URL.
+- **Node can import the package, but cannot run `build()`**: there is no
+  `navigator.serviceWorker`. Under Node, use the `SiteHandler` directly.
+
+### Dependencies
 
 | Dependency | Kind | Why |
 | --- | --- | --- |
-| [`@statewalker/webrun-site-builder`](../webrun-site-builder) | runtime | The `SiteHandler` shape and file/endpoint composition. |
-| [`@statewalker/webrun-http-browser`](../webrun-http-browser) | runtime | `SwHttpAdapter` — the ServiceWorker registration and dispatch. |
-| `@statewalker/webrun-files-mem` | runtime | In-memory `FilesApi` used when resolving inline file maps. |
-| [`@statewalker/webrun-files`](https://github.com/statewalker/webrun-files) | **peer** (`^0.7.0`) | The `FilesApi` interface itself. |
-
-Browser-only: requires `navigator.serviceWorker` and therefore a secure
-context. ESM only (`"type": "module"`).
-
-## Development
-
-```bash
-pnpm test        # vitest run
-pnpm run build   # rolldown + tsc --emitDeclarationOnly
-pnpm lint        # biome check src tests
-```
+| `@statewalker/webrun-site-builder` | runtime | The `SiteHandler`, `EndpointHandler` and `EndpointEnv` types. |
+| `@statewalker/webrun-http-browser` | runtime | `SwHttpAdapter`: ServiceWorker registration and dispatch. |
+| `@statewalker/webrun-files-mem` | runtime | The in-memory `FilesApi` that `resolveFilesSource` creates. |
+| `@statewalker/webrun-files` | peer | The `FilesApi` interface. |
 
 ## License
 

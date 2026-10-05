@@ -1,11 +1,11 @@
 # site-builder-tsx-spike
 
+## What it is
+
 A spike on top of [`site-builder-demo`](../site-builder-demo) that
 adds one thing: source-level transpilation of `.ts` and `.tsx` files
 served from the in-memory site, so the browser's native module loader
 can run them as-is.
-
-## Main demonstration point
 
 **`ServeFilesOptions.transform` is a per-mount Response filter, and a
 single sucrase-backed instance applied to both the `/client` and
@@ -25,11 +25,7 @@ The same filter handles three cases uniformly:
   `@statewalker/webrun-site-host`; its third argument is the env bag the
   module receives alongside the URL params on every call.
 
-No bundler, no service-side build step, no SW-internal wasm. sucrase
-is pure JS, runs on the main thread; the SW just relays. Output is
-cached by source SHA-256 so repeated fetches don't re-transpile.
-
-## What's served
+## Layout
 
 ```
 /client/index.html       static
@@ -47,30 +43,15 @@ All of the above sit under the site key, so the browser sees them as
 Wiring is in [`src/main.ts`](./src/main.ts); the transform is in
 [`src/script-transform.ts`](./src/script-transform.ts).
 
-## What it does not do
+## How to run it
 
-Everything that's Step 2+ of the in-browser build pipeline:
+1. From the repository root: `pnpm install` and `pnpm build`.
+2. `pnpm --filter @statewalker/site-builder-tsx-spike dev` — Vite on
+   <http://localhost:5174>.
+3. Type in the Name field. Every keystroke fetches `/api`, runs the typed server
+   handler, and renders the formatted response.
 
-- No `external/<pkg>@<v>/...` virtual mount, no CDN fetching of bare
-  specifiers.
-- No `uri-graph` integration, no `ContentRouter`, no multi-FS layering.
-- No `es-module-lexer`, no import rewriting, no source maps, no HMR.
-- No persistent cache — only an in-memory `Map<sha256, code>`.
-
-The Step 1 spec (`notes/2026-04/2026-04-28/06.in-browser-build-pipeline-architecture.md`)
-lives outside this repository, so there is no link to follow from here.
-
-## Run
-
-```sh
-pnpm --filter @statewalker/site-builder-tsx-spike dev
-```
-
-Open <http://localhost:5174>. Type in the Name field — every
-keystroke fetches `/api`, runs the typed server handler, and renders
-the formatted response.
-
-## Verify in DevTools
+### Check it in DevTools
 
 In Network, the response `Content-Type` for `client/main.tsx`,
 `client/format.ts`, and `server/api/index.ts` is `text/javascript`,
@@ -80,21 +61,41 @@ annotations).
 In Console, `[script-transform]` logs once per script fetch — useful
 for catching a stale-SW scenario where the filter never runs.
 
-## Stale ServiceWorker?
+## Why it is the way it is
+
+### Transpiling on the main thread keeps the ServiceWorker a relay
+
+No bundler, no service-side build step, no SW-internal wasm. sucrase
+is pure JS, runs on the main thread; the SW just relays. Output is
+cached by source SHA-256 so repeated fetches don't re-transpile.
+
+### What it deliberately does not do
+
+- No virtual mount for npm packages and no CDN fetching of bare specifiers
+  (`site-builder-jspm-demo` adds that).
+- No import rewriting, no source maps, no HMR.
+- No persistent cache: transpiled output lives in an in-memory `Map` keyed by
+  the source's SHA-256.
+
+## What will surprise you
+
+### A stale ServiceWorker keeps serving old code
 
 If the spike behaves as if old code is running, you have a stale SW
 from a previous session. **DevTools → Application → Service Workers
 → Unregister**, then **Storage → Clear site data**, then hard reload.
 Or just open the spike in a fresh Incognito/Private window.
 
-## Dependencies
+## Reference
 
-Workspace: [`webrun-site-builder`](../../packages/webrun-site-builder), [`webrun-site-host`](../../packages/webrun-site-host), [`webrun-http-browser`](../../packages/webrun-http-browser).
+### Commands
 
-Runtime: `sucrase` (the on-the-fly `.ts` / `.tsx` transpiler this spike exists to demonstrate), `@statewalker/webrun-files-mem`.
+Run from `apps/site-builder-tsx-spike/`: `pnpm run dev` (port 5174),
+`pnpm run build`, `pnpm run preview` (port 5174), `pnpm run typecheck`.
 
-Dev: `vite`, `typescript`, `@statewalker/webrun-files`.
+### Dependencies
 
-## License
-
-Private demo, not published. MIT © statewalker — see [LICENSE](../../LICENSE).
+`sucrase` (the in-browser `.ts`/`.tsx` transpiler this app demonstrates),
+`@statewalker/webrun-site-builder`, `@statewalker/webrun-site-host`,
+`@statewalker/webrun-http-browser`, `@statewalker/webrun-files-mem`. Dev: `vite`,
+`typescript`, `@statewalker/webrun-files`. Private, not published.

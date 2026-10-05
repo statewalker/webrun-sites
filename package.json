@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.16.1",
-  "description": "Incremental resource transformation — build engine, module resolution/serving, and transforms",
+  "description": "Incremental build engine, module server and site builder/host for running TypeScript sites without a bundler",
   "bugs": {
     "url": "https://github.com/statewalker/webrun-sites/issues"
   },

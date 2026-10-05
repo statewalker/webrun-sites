@@ -19,7 +19,7 @@ The demo ships two page roles, both of which can run in any number of tabs:
 
 Discovery is a **relay-mediated request/response protocol**
 (`lib/discovery.ts`, protocol `/p2p-demo/discovery/1.0.0`), not gossipsub.
-gossipsub has no libp2p 3.x release: registered under libp2p 3.3.8 it
+gossipsub has no libp2p 3.x release: registered under libp2p 3.x it
 constructs and subscribes without error and then silently delivers nothing.
 Each page periodically opens one stream to the relay, sends its group id and
 current service catalog, and gets back — in the same round trip — every other
@@ -29,28 +29,42 @@ announcing peer through the connection's **Noise-proven** identity
 in-memory `GroupState` per group id, discarding a group's entry the moment it
 empties.
 
-HTTP traffic itself flows peer-to-peer over the existing
-`Connect/Serve/Duplex` libp2p adapter from ADR-0004.
+HTTP traffic itself flows peer-to-peer over the `Connect/Serve/Duplex`
+libp2p adapter from `@statewalker/webrun-streams-libp2p`.
 
-## Why it exists
+## Layout
 
-The previous version of this demo required manual peer-id copy-paste between
-two browser tabs — a step that does not survive contact with anything beyond
-"two tabs on one developer's machine". This iteration removes the copy-paste
-entirely by adding relay-mediated group discovery and service announcement,
-so the demo reflects how a deployed mesh would actually behave: peers find
-each other through a shared `groupId`, announce what they offer, and
-consumers mount services without any out-of-band coordination.
+```
+apps/p2p-demo/
+├── lib/
+│   ├── discovery.ts            # DISCOVERY_PROTOCOL request/response: serveDiscovery() (relay side, one GroupState per groupId) + discoveryClient() (peer side, one announce = one stream = one round trip)
+│   ├── announcement.ts         # ServiceAnnouncement / Service (HttpService | PresenceHubService) types + JSON encode/decode
+│   ├── group-state.ts          # pure receiver state machine (applyAnnouncement / applyLeave / evictStale)
+│   ├── join-group.ts           # joinGroup(): announce on a tick (5s) + sweep (1s) + beforeunload leave + background connection pre-warming (preWarmPeers)
+│   ├── peer-id-synth.ts        # SHA-1-derived synthetic id ("abcd-1234"); cached + async; onSynthCacheUpdate subscription
+│   └── browser-node.ts         # libp2p factory — WebSockets/WebRTC/Circuit-Relay-v2 transports; DEV-only connectionGater relaxation (see Constraints)
+├── relay/
+│   └── server.ts               # Node libp2p Circuit Relay v2 + serveDiscovery(), advertising itself as an always-on presence-hub member of every group
+├── server-page/
+│   ├── index.html              # H1 (Server: <synth>) + status header + My services + Peers in group + Activity log
+│   └── main.ts                 # SiteHandler (/, /news, /api/*) with synth in served HTML titles; serveLibp2p; joinGroup; announceService×2
+├── client-page/
+│   ├── index.html              # H1 (Client: <synth>) + status header + Services in group (live) + Mounted (stacked) + Activity log
+│   └── main.ts                 # shared SwHttpAdapter + cached call handles + explicit relay→circuit→webrtc dial + mount/unmount + ghost rows
+├── tests/
+│   └── discovery.test.ts       # vitest, over real in-process libp2p nodes: relay-mediated announce/reply, group isolation, TTL eviction, empty-group cleanup
+├── e2e/
+│   └── browser-to-browser.mjs  # Playwright harness: two real browsers through discover → dial → mount; E2E_BROWSER=chromium|firefox
+├── vite.server.config.ts       # serves server-page/ on 5175
+├── vite.client.config.ts       # serves client-page/ on 5176 (+ sw-worker.js)
+└── scripts/
+    └── start.sh                 # boots relay, parses multiaddr, injects VITE_RELAY_MULTIADDR + VITE_GROUP_ID
+```
 
-Parts of the discovery/announcement layer (the discovery protocol, the
-`joinGroup` API, the per-peer call-handle cache) are candidates for later
-extraction into a `webrun-p2p-mesh` package. **Extraction is explicitly out
-of scope for this iteration** — the goal here is to prove the shape inside
-the app, and only then decide what the package boundary looks like.
+## How to run it
 
-## How to use
-
-From `apps/p2p-demo/`:
+From the repository root run `pnpm install` and `pnpm build` once, then from
+`apps/p2p-demo/`:
 
 ```sh
 pnpm start              # boots relay + server-page (5175) + client-page (5176)
@@ -93,13 +107,13 @@ group a tab is in or what role it plays.
 Open additional server-page tabs to add more services to the same group;
 client-page tabs see the new services within one announcement interval (≤5s).
 
-### Tests
+### Unit tests run without a browser
 
 `pnpm test` runs `tests/discovery.test.ts` — the relay-mediated discovery
 protocol over real in-process libp2p nodes (announce/reply, group isolation,
 TTL eviction, empty-group cleanup). No browser involved.
 
-### End-to-end test
+### The end-to-end test drives two real browsers
 
 `e2e/browser-to-browser.mjs` drives two real browsers (via Playwright) through
 the full discover → dial → mount path and asserts it works:
@@ -109,7 +123,117 @@ E2E_BROWSER=chromium pnpm run e2e   # default if E2E_BROWSER is unset
 E2E_BROWSER=firefox  pnpm run e2e
 ```
 
-### Synthetic peer ids
+## Why it is the way it is
+
+Peers find each other through a shared `groupId`, announce what they offer, and
+consumers mount services without any out-of-band step such as pasting a peer id
+between tabs. That is how a deployed mesh has to behave, and the demo keeps all of
+it inside the app (`lib/`): the discovery protocol, the `joinGroup` API and the
+per-peer call-handle cache.
+
+### Discovery is a request/response protocol on the relay
+
+Discovery and the service catalog are both served by one relay-side
+request/response protocol (`/p2p-demo/discovery/1.0.0`, `lib/discovery.ts`),
+not by gossipsub: gossipsub has **no libp2p 3.x release**, so under
+libp2p 3.x it registers and subscribes without throwing and then silently
+never delivers a message — a failure mode that looks like a networking bug
+rather than a missing release.
+
+The protocol, end to end:
+
+1. A page calls `joinGroup({ node, groupId, relay })`. On a 5-second tick
+   (plus immediately after `announceService`/`removeService`/`leave`), it
+   opens one libp2p stream to the relay over `discoveryClient`, sends the
+   group id and its current `ServiceAnnouncement` as two length-prefixed
+   records, and awaits the reply on the same stream.
+2. The relay's `serveDiscovery` handler reads the two records, looks up (or
+   creates) that group id's `GroupState`, and — critically — **replaces the
+   payload's `peerId` with the Noise-proven `context.remotePeer`** before
+   applying the announcement. The wire payload's own `peerId` field is never
+   trusted for authentication; it exists only so the same JSON shape can be
+   echoed back to other peers.
+3. It applies the announcement (or the `leave` variant) to that group's
+   state, evicts anything past its TTL, and — if the state is now empty —
+   deletes the group's entry from the outer `groups` map, so a client cycling
+   through arbitrary group ids cannot grow the relay's memory without bound.
+4. It replies with every *other* peer's current catalog in that same group
+   (plus, optionally, a synthesized `PresenceHubService` entry for the
+   relay's own identity — see `relay/server.ts`).
+5. The client applies the reply to its local `GroupState` and emits a
+   coalesced `"change"` event to listeners, then best-effort pre-warms
+   connections to any newly-seen peer.
+
+Because `groupId` lives only in the discovery envelope (not in
+`ServiceAnnouncement` itself), one relay instance serves arbitrarily many
+groups from one `Map<groupId, GroupState>`, with each group's peers
+completely isolated from every other group's.
+
+Key invariants:
+
+- **`joinGroup` is the only application-level entry point.** Both pages
+  call it the same way; the only difference is whether they call
+  `announceService(...)` afterwards.
+- **ServiceAnnouncements are full snapshots, not diffs.** Receivers
+  `state.set(peerId, …)` per message — no merging at the protocol layer.
+  Per-peer eviction follows naturally.
+- **The relay never trusts a client-supplied `peerId`.** It always
+  overwrites the payload's claim with the connection's proven remote peer
+  before storing or forwarding an announcement.
+- **The mounted-iframe handler looks up the current call handle on every
+  fetch**, so a peer that evicts and rejoins (same peerId) transparently
+  reconnects on the next request. The cached handle is recreated lazily.
+- **The Services list is the single control surface** for mounting and
+  unmounting. The Mounted-iframes section has no controls of its own.
+  Ghost rows (peer evicted but iframe still up) provide the unmount path.
+- **One shared `SwHttpAdapter` per client tab** (key
+  `"p2p-demo-mounts"`). The SW dispatcher's `handlersIndex` is keyed by
+  browser-client id — one entry per tab — so each new mount's
+  `UPDATE_COMMUNICATION_PORT` would overwrite the previous mount's entry
+  if every `HostedSiteBuilder` constructed its own adapter. We wrap the
+  shared adapter to expose `start` / `register` but not `stop`, so
+  per-mount `HostedSite.stop()` only deletes its own handler from the
+  adapter's `_handlers` map and the SW stays alive for the tab.
+- **The client dial constructs `${relay}/p2p-circuit/webrtc/p2p/<peerId>`
+  unconditionally and calls `node.dial(peerMa)` before `connectLibp2p`.**
+  The `/webrtc` segment forces libp2p to upgrade to direct WebRTC; without
+  the explicit dial, a limited circuit-relay-only connection rejects custom
+  protocols.
+
+### libp2p's browser gater blocks the local relay, so DEV relaxes it
+
+- Localhost only (plain `ws://` relay). Production deployment is out of scope.
+- The relay is the **only** bootstrap path: every browser dials the relay on
+  load, discovery round trips happen through the relay, and peers upgrade to
+  direct WebRTC once they've seen each other's announcements. If the relay
+  disappears, existing WebRTC connections keep working but the group view
+  freezes (no new discovery) until the periodic relay-keepalive re-dial
+  succeeds.
+- The stack is **libp2p 3.x**. `lib/browser-node.ts` supplies a
+  `connectionGater` gated on `import.meta.env.DEV`: libp2p 3.x's browser
+  default connection gater denies dialing **both** insecure `ws://`
+  addresses and private/loopback addresses, which is exactly what this
+  demo's own relay is (`ws://127.0.0.1:<port>`). Without the relaxation,
+  every dial the app makes — to the relay itself and to every derived
+  `/p2p-circuit/webrtc/p2p/...` peer address — would be denied before any
+  handshake, and discovery and mounting would never work at all. The gate is
+  keyed on `DEV`, so a production build (a real `wss://` DNS name) keeps
+  libp2p's default posture.
+- WebTransport, DHT, rendezvous, mDNS and `libp2p-daemon-*` are not used.
+
+### Lifecycle timings and why
+
+| Knob | Value | Reasoning |
+|---|---|---|
+| Re-announce interval (K) | **5 s** | Snappy enough that newly opened tabs feel instant after the immediate first announce |
+| Staleness window (T) | **15 s** = 3 × K | Tolerates one missed announce round trip plus slack before evicting |
+| Eviction sweep | **1 s** | Bounded gap between TTL expiry and visible eviction, on both the relay and each page |
+| Eviction mechanism | **TTL + explicit "leave" on `beforeunload`** (best-effort) | Instant clean-shutdown UX; TTL is the safety net for crashes / forced close |
+| Eviction granularity | **Per-peer** | Each announcement is the peer's full current catalog; clients reconcile by array-replace |
+| Announce triggers | **Tick (5s) + immediately on `announceService`/`removeService`/`leave`** | Reactive; bounded chatter; local catalog changes don't wait one full tick |
+| Mounted-iframe behavior when source peer vanishes | **Iframe stays, "disconnected" badge**; user unmounts via the Services list row; auto-reconnects if same `(peerId, serviceId)` reappears | Never yank an iframe mid-interaction; the Services list is the single control surface |
+
+### Short synthetic ids make tabs distinguishable
 
 libp2p peer ids (`12D3KooW…`) are long and visually indistinguishable at a
 glance. The demo derives a deterministic 8-hex-char synthetic id from the
@@ -121,7 +245,30 @@ served by the server** (each page's `<title>` and `<h1>` includes the
 server's synth) — use the synth so multiple tabs of the same service are
 visually distinct.
 
-## Examples
+## What will surprise you
+
+- **The DEV-only connection gater is required on localhost.** Without it libp2p
+  denies every dial to `ws://127.0.0.1` before any handshake, and discovery and
+  mounting silently never work (see "libp2p's browser gater blocks the local
+  relay" above).
+- **Port 5175 is shared with `site-builder-jspm-demo`.** The server page and that
+  demo both use it; do not run them at the same time.
+- **A stale group view is a relay problem, not a peer problem.** If the relay
+  stops, existing iframes keep working over WebRTC but no new peers appear until
+  the keepalive re-dial succeeds.
+
+### Failure and edge paths
+
+| Scenario | Behavior | Where it's specified |
+|---|---|---|
+| Relay unreachable on boot | Both pages show "relay dial failed" in status; `joinGroup` never gets a first successful announce | Constraints (relay is the only bootstrap path) |
+| Relay dies after boot | Existing direct-WebRTC peer connections survive; both pages poll every 10s and re-dial the relay if the connection drops; group view freezes until it reconnects | `browser-node.ts` relay-keepalive loop in `server-page/main.ts` / `client-page/main.ts` |
+| Peer evicted mid-fetch (TTL expires while an HTTP request is in flight) | The in-flight `fetchOverDuplex` rejects; iframe surfaces the network error; row becomes a "ghost" `[Unmount]` row | Lifecycle defaults + UI sketch |
+| `groupId` missing in URL fragment and env | Falls back to `"default"` group — no error | How to run it |
+| `announceService`/`removeService` fires while a previous announce round trip is still in flight | Each call fires its own `announceCurrent()` immediately, independent of any in-flight one; announcements are full snapshots, so whichever reply lands last simply overwrites — no merge, no queue | Architecture (ServiceAnnouncements are full snapshots) |
+| Same `(peerId, serviceId)` reappears after eviction | Ghost row flips back to `mounted`; call handle is re-opened lazily on next request | UI sketch |
+
+## Reference
 
 ### `joinGroup` — the API every page calls
 
@@ -154,10 +301,9 @@ connection to anyone. `joinGroup` runs a background **connection pre-warmer**
 (`preWarmPeers` in `lib/join-group.ts`) after each successful announce round
 trip: for every peer newly visible in the group state, it best-effort dials
 `${relay}/p2p-circuit/webrtc/p2p/<peerId>` in the background, so by the time
-the user clicks `[Mount]` the WebRTC upgrade is often already warm. This
-replaces the auto-dial that `pubsub-peer-discovery`'s libp2p integration used
-to provide for free; failures are swallowed, since a peer being briefly
-unreachable must not disturb discovery.
+the user clicks `[Mount]` the WebRTC upgrade is often already warm. Failures
+are swallowed, since a peer being briefly unreachable must not disturb
+discovery.
 
 ### Wire shape — the discovery envelope and the announcement
 
@@ -216,7 +362,7 @@ const selfSynth = await ensureSynth(node.peerId.toString());
 await node.dial(multiaddr(relayMultiaddr));
 const group = await joinGroup({ node, groupId: GROUP_ID, relay: multiaddr(relayMultiaddr) });
 
-// Same SiteHandler shape as today — see ADR-0004. The served HTML embeds
+// The same SiteHandler shape as any other host. The served HTML embeds
 // `selfSynth` in each page's <title>/<h1> so the rendered iframe content
 // is self-identifying ("Hello site · ab12-cd34") when multiple servers
 // run in the same group.
@@ -352,7 +498,7 @@ group.on("change", (state) => {
 });
 ```
 
-### UI sketch (illustrative — exact markup grilled out at implementation time)
+### UI sketch (illustrative)
 
 **Server page**
 
@@ -430,156 +576,9 @@ Behavior locked in:
 - **Iframes stacked vertically** (no tabs / grid).
 - **Disconnected iframes never auto-evict** — the user controls cleanup via the Services list.
 
-### Failure / edge paths
-
-Concentrated overview; each is covered by the surrounding sections.
-
-| Scenario | Behavior | Where it's specified |
-|---|---|---|
-| Relay unreachable on boot | Both pages show "relay dial failed" in status; `joinGroup` never gets a first successful announce | Constraints (relay is the only bootstrap path) |
-| Relay dies after boot | Existing direct-WebRTC peer connections survive; both pages poll every 10s and re-dial the relay if the connection drops; group view freezes until it reconnects | `browser-node.ts` relay-keepalive loop in `server-page/main.ts` / `client-page/main.ts` |
-| Peer evicted mid-fetch (TTL expires while an HTTP request is in flight) | The in-flight `fetchOverDuplex` rejects; iframe surfaces the network error; row becomes a "ghost" `[Unmount]` row | Lifecycle defaults + UI sketch |
-| `groupId` missing in URL fragment and env | Falls back to `"default"` group — no error | `How to use` |
-| `announceService`/`removeService` fires while a previous announce round trip is still in flight | Each call fires its own `announceCurrent()` immediately, independent of any in-flight one; announcements are full snapshots, so whichever reply lands last simply overwrites — no merge, no queue | Architecture (ServiceAnnouncements are full snapshots) |
-| Same `(peerId, serviceId)` reappears after eviction | Ghost row flips back to `mounted`; call handle is re-opened lazily on next request | UI sketch |
-
-## Internals
-
-```
-apps/p2p-demo/
-├── lib/
-│   ├── discovery.ts            # DISCOVERY_PROTOCOL request/response: serveDiscovery() (relay side, one GroupState per groupId) + discoveryClient() (peer side, one announce = one stream = one round trip)
-│   ├── announcement.ts         # ServiceAnnouncement / Service (HttpService | PresenceHubService) types + JSON encode/decode
-│   ├── group-state.ts          # pure receiver state machine (applyAnnouncement / applyLeave / evictStale)
-│   ├── join-group.ts           # joinGroup(): announce on a tick (5s) + sweep (1s) + beforeunload leave + background connection pre-warming (preWarmPeers)
-│   ├── peer-id-synth.ts        # SHA-1-derived synthetic id ("abcd-1234"); cached + async; onSynthCacheUpdate subscription
-│   └── browser-node.ts         # libp2p factory — WebSockets/WebRTC/Circuit-Relay-v2 transports; DEV-only connectionGater relaxation (see Constraints)
-├── relay/
-│   └── server.ts               # Node libp2p Circuit Relay v2 + serveDiscovery(), advertising itself as an always-on presence-hub member of every group
-├── server-page/
-│   ├── index.html              # H1 (Server: <synth>) + status header + My services + Peers in group + Activity log
-│   └── main.ts                 # SiteHandler (/, /news, /api/*) with synth in served HTML titles; serveLibp2p; joinGroup; announceService×2
-├── client-page/
-│   ├── index.html              # H1 (Client: <synth>) + status header + Services in group (live) + Mounted (stacked) + Activity log
-│   └── main.ts                 # shared SwHttpAdapter + cached call handles + explicit relay→circuit→webrtc dial + mount/unmount + ghost rows
-├── tests/
-│   └── discovery.test.ts       # vitest, over real in-process libp2p nodes: relay-mediated announce/reply, group isolation, TTL eviction, empty-group cleanup
-├── e2e/
-│   └── browser-to-browser.mjs  # Playwright harness: two real browsers through discover → dial → mount; E2E_BROWSER=chromium|firefox
-├── vite.server.config.ts       # serves server-page/ on 5175
-├── vite.client.config.ts       # serves client-page/ on 5176 (+ sw-worker.js)
-└── scripts/
-    └── start.sh                 # boots relay, parses multiaddr, injects VITE_RELAY_MULTIADDR + VITE_GROUP_ID
-```
-
-### Architecture: relay-mediated discovery
-
-Discovery and the service catalog are both served by one relay-side
-request/response protocol (`/p2p-demo/discovery/1.0.0`, `lib/discovery.ts`),
-not by gossipsub. This was a deliberate pivot away from an earlier
-two-gossipsub-topic design: gossipsub has **no libp2p 3.x release**, so under
-libp2p 3.3.8 it registers and subscribes without throwing and then silently
-never delivers a message — a failure mode that looks like a networking bug
-rather than a missing release.
-
-The protocol, end to end:
-
-1. A page calls `joinGroup({ node, groupId, relay })`. On a 5-second tick
-   (plus immediately after `announceService`/`removeService`/`leave`), it
-   opens one libp2p stream to the relay over `discoveryClient`, sends the
-   group id and its current `ServiceAnnouncement` as two length-prefixed
-   records, and awaits the reply on the same stream.
-2. The relay's `serveDiscovery` handler reads the two records, looks up (or
-   creates) that group id's `GroupState`, and — critically — **replaces the
-   payload's `peerId` with the Noise-proven `context.remotePeer`** before
-   applying the announcement. The wire payload's own `peerId` field is never
-   trusted for authentication; it exists only so the same JSON shape can be
-   echoed back to other peers.
-3. It applies the announcement (or the `leave` variant) to that group's
-   state, evicts anything past its TTL, and — if the state is now empty —
-   deletes the group's entry from the outer `groups` map, so a client cycling
-   through arbitrary group ids cannot grow the relay's memory without bound.
-4. It replies with every *other* peer's current catalog in that same group
-   (plus, optionally, a synthesized `PresenceHubService` entry for the
-   relay's own identity — see `relay/server.ts`).
-5. The client applies the reply to its local `GroupState` and emits a
-   coalesced `"change"` event to listeners, then best-effort pre-warms
-   connections to any newly-seen peer.
-
-Because `groupId` lives only in the discovery envelope (not in
-`ServiceAnnouncement` itself), one relay instance serves arbitrarily many
-groups from one `Map<groupId, GroupState>`, with each group's peers
-completely isolated from every other group's.
-
-Key invariants:
-
-- **`joinGroup` is the only application-level entry point.** Both pages
-  call it the same way; the only difference is whether they call
-  `announceService(...)` afterwards.
-- **ServiceAnnouncements are full snapshots, not diffs.** Receivers
-  `state.set(peerId, …)` per message — no merging at the protocol layer.
-  Per-peer eviction follows naturally.
-- **The relay never trusts a client-supplied `peerId`.** It always
-  overwrites the payload's claim with the connection's proven remote peer
-  before storing or forwarding an announcement.
-- **The mounted-iframe handler looks up the current call handle on every
-  fetch**, so a peer that evicts and rejoins (same peerId) transparently
-  reconnects on the next request. The cached handle is recreated lazily.
-- **The Services list is the single control surface** for mounting and
-  unmounting. The Mounted-iframes section has no controls of its own.
-  Ghost rows (peer evicted but iframe still up) provide the unmount path.
-- **One shared `SwHttpAdapter` per client tab** (key
-  `"p2p-demo-mounts"`). The SW dispatcher's `handlersIndex` is keyed by
-  browser-client id — one entry per tab — so each new mount's
-  `UPDATE_COMMUNICATION_PORT` would overwrite the previous mount's entry
-  if every `HostedSiteBuilder` constructed its own adapter. We wrap the
-  shared adapter to expose `start` / `register` but not `stop`, so
-  per-mount `HostedSite.stop()` only deletes its own handler from the
-  adapter's `_handlers` map and the SW stays alive for the tab.
-- **The client dial constructs `${relay}/p2p-circuit/webrtc/p2p/<peerId>`
-  unconditionally and calls `node.dial(peerMa)` before `connectLibp2p`.**
-  The `/webrtc` segment forces libp2p to upgrade to direct WebRTC; without
-  the explicit dial, a limited circuit-relay-only connection rejects custom
-  protocols.
-
-### Constraints
-
-- Localhost only (plain `ws://` relay). Production deployment is out of scope.
-- The relay is the **only** bootstrap path: every browser dials the relay on
-  load, discovery round trips happen through the relay, and peers upgrade to
-  direct WebRTC once they've seen each other's announcements. If the relay
-  disappears, existing WebRTC connections keep working but the group view
-  freezes (no new discovery) until the periodic relay-keepalive re-dial
-  succeeds.
-- The stack is **libp2p 3.3.8**. `lib/browser-node.ts` supplies a
-  `connectionGater` gated on `import.meta.env.DEV`: libp2p 3.x's browser
-  default connection gater denies dialing **both** insecure `ws://`
-  addresses and private/loopback addresses, which is exactly what this
-  demo's own relay is (`ws://127.0.0.1:<port>`). Without the relaxation,
-  every dial the app makes — to the relay itself and to every derived
-  `/p2p-circuit/webrtc/p2p/...` peer address — would be denied before any
-  handshake, and discovery and mounting would never work at all. The gate is
-  keyed on `DEV` rather than left as a bare relaxation so a future production
-  build (real `wss://` DNS name) falls back to libp2p's default posture
-  automatically, without relying on someone remembering to remove a comment.
-- WebTransport, DHT, rendezvous, mDNS, and `libp2p-daemon-*` are explicitly
-  **not** in scope for this iteration.
-
-### Lifecycle defaults
-
-| Knob | Value | Reasoning |
-|---|---|---|
-| Re-announce interval (K) | **5 s** | Snappy enough that newly opened tabs feel instant after the immediate first announce |
-| Staleness window (T) | **15 s** = 3 × K | Tolerates one missed announce round trip plus slack before evicting |
-| Eviction sweep | **1 s** | Bounded gap between TTL expiry and visible eviction, on both the relay and each page |
-| Eviction mechanism | **TTL + explicit "leave" on `beforeunload`** (best-effort) | Instant clean-shutdown UX; TTL is the safety net for crashes / forced close |
-| Eviction granularity | **Per-peer** | Each announcement is the peer's full current catalog; clients reconcile by array-replace |
-| Announce triggers | **Tick (5s) + immediately on `announceService`/`removeService`/`leave`** | Reactive; bounded chatter; local catalog changes don't wait one full tick |
-| Mounted-iframe behavior when source peer vanishes | **Iframe stays, "disconnected" badge**; user unmounts via the Services list row; auto-reconnects if same `(peerId, serviceId)` reappears | Never yank an iframe mid-interaction; the Services list is the single control surface |
-
 ### Dependencies
 
-- `libp2p` **3.3.8**, `@libp2p/identify`, `@libp2p/circuit-relay-v2`,
+- `libp2p` (3.x), `@libp2p/identify`, `@libp2p/circuit-relay-v2`,
   `@libp2p/webrtc`, `@libp2p/websockets`, `@chainsafe/libp2p-noise`,
   `@chainsafe/libp2p-yamux` — the libp2p transport stack, shared by
   `lib/browser-node.ts` and `relay/server.ts`.
@@ -590,7 +589,7 @@ Key invariants:
   targets are built directly from the known relay multiaddr, not looked up
   via any discovery-provided address).
 - `@statewalker/webrun-streams`, `@statewalker/webrun-streams-libp2p` — the
-  `Connect/Serve/Duplex` seam (ADR-0004); `serveConnections`/`connect` from
+  `Connect/Serve/Duplex` seam; `serveConnections`/`connect` from
   `webrun-streams-libp2p` also back the discovery protocol itself
   (`lib/discovery.ts`).
 - `@statewalker/webrun-site-builder`, `@statewalker/webrun-site-host`,
@@ -598,11 +597,4 @@ Key invariants:
   the `SiteHandler` shape and same-origin SW mount.
 - `playwright` (dev) — drives `e2e/browser-to-browser.mjs`.
 
-Notably **absent**: gossipsub and `@libp2p/pubsub-peer-discovery`. The
-earlier iteration of this demo used both; see "Architecture" above for why
-they were dropped, and `lib/group-topics.ts` — which named the two gossipsub
-topics — no longer exists.
-
-## License
-
-Private demo, not published. MIT © statewalker — see [LICENSE](../../LICENSE).
+Private, not published.

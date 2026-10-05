@@ -1,10 +1,14 @@
 # livekit-demo
 
+## What it is
+
 Cross-app HTTP + SSE demonstration using **LiveKit** as the initialisation
 and transport layer. Mirror of [p2p-demo](../p2p-demo/) with a LiveKit room
 replacing the libp2p Circuit Relay v2 + WebRTC link.
 
-## Pieces
+## Layout
+
+### Four processes
 
 | Piece | What it is | Listens on |
 | --- | --- | --- |
@@ -16,12 +20,30 @@ replacing the libp2p Circuit Relay v2 + WebRTC link.
 Data flows peer-to-peer over LiveKit's per-participant data channel
 (`localParticipant.publishData` with `destinationIdentities`).
 
-## Quick start
+### Files
 
-From `workspaces/webrun-wire/`:
+```
+apps/livekit-demo/
+├── package.json
+├── tsconfig.json
+├── vite.server.config.ts        # serves server-page/ on 5275
+├── vite.client.config.ts        # serves client-page/ on 5276 (+ sw-worker.js)
+├── token-service/server.ts      # Node HTTP server, livekit-server-sdk AccessToken
+├── server-page/                 # SiteBuilder + serveFetchOverDuplex + serve() per participant
+├── client-page/                 # HostedSiteBuilder + fetchOverDuplex + iframe + SSE
+├── lib/
+│   ├── config.ts                # shared constants (URLs, room name, identities)
+│   └── livekit-room.ts          # fetch token → Room.connect helper
+└── scripts/start.sh             # boots all four (Docker server + Node service + 2 vite)
+```
+
+## How to run it
+
+From the repository root:
 
 ```sh
 pnpm install
+pnpm build
 pnpm --filter @statewalker/livekit-demo start
 ```
 
@@ -41,7 +63,7 @@ The launcher:
 3. Starts both Vite dev servers (`5275`, `5276`).
 4. Ctrl-C tears all of them down.
 
-## Flow
+### What you see
 
 1. Open <http://localhost:5275> — server page connects to the room as
    identity `site-server`. UI shows status.
@@ -59,7 +81,7 @@ The launcher:
    `AbortSignal` — server-side cancellation propagates the same way as in
    `p2p-demo`.
 
-## Architecture & seam
+## Why it is the way it is
 
 - **Same `SiteHandler` shape** as `p2p-demo`. The only difference is *which*
   `webrun-streams-*` adapter supplies the `Duplex`:
@@ -75,24 +97,7 @@ The launcher:
   sender identity inside `byteChannelFromLiveKit`, on top of which
   `emulateMux` provides the multi-stream layer.
 
-## Project layout
-
-```
-apps/livekit-demo/
-├── package.json
-├── tsconfig.json
-├── vite.server.config.ts        # serves server-page/ on 5275
-├── vite.client.config.ts        # serves client-page/ on 5276 (+ sw-worker.js)
-├── token-service/server.ts      # Node HTTP server, livekit-server-sdk AccessToken
-├── server-page/                 # SiteBuilder + serveFetchOverDuplex + serve() per participant
-├── client-page/                 # HostedSiteBuilder + fetchOverDuplex + iframe + SSE
-├── lib/
-│   ├── config.ts                # shared constants (URLs, room name, identities)
-│   └── livekit-room.ts          # fetch token → Room.connect helper
-└── scripts/start.sh             # boots all four (Docker server + Node service + 2 vite)
-```
-
-## Caveats
+## What will surprise you
 
 - **Dev credentials** (`devkey` / `secret`) are baked into the token service
   for zero-config local use. **Never use these in production** — the token
@@ -104,15 +109,33 @@ apps/livekit-demo/
 - **Identity collisions** — if two server pages try to join with
   `site-server` simultaneously, LiveKit allows the second one and may kick
   the first. Reload causes a brief blip; usually self-heals.
+- **No Docker and no server on `:7880`:** `pnpm start` exits with
+  ``[livekit-demo] No LiveKit server on :7880, and `docker` is not installed.``
+  and lists the alternatives.
+- **`SKIP_LIVEKIT_SERVER=1` with nothing listening:** the pages hang on connect;
+  the launcher warns `If nothing is listening, the pages will hang on connect.`
+- **Ports 5275 and 5276 must be free.** They are fixed in the Vite configs.
 
-## Dependencies
+## Reference
 
-Workspace: [`webrun-streams`](../../packages/webrun-streams), [`webrun-streams-livekit`](../../packages/webrun-streams-livekit), [`webrun-http-streams`](../../packages/webrun-http-streams), [`webrun-site-builder`](../../packages/webrun-site-builder), [`webrun-site-host`](../../packages/webrun-site-host).
+### Environment variables of `scripts/start.sh`
 
-Vendor: `livekit-client` (^2.18.3), `livekit-server-sdk` (^2.10.0).
+| Variable | Effect |
+| --- | --- |
+| `LIVEKIT_URL` | URL injected into both pages (default `ws://localhost:7880`) |
+| `SKIP_LIVEKIT_SERVER` | when set, do not start the Docker server |
+| `LIVEKIT_IMAGE` | Docker image (default `livekit/livekit-server:latest`) |
 
-Dev: `vite`, `typescript`, `tsx`, `@types/node`, [`webrun-http-browser`](../../packages/webrun-http-browser). Docker is required for the dev LiveKit server.
+### Commands
 
-## License
+Run from `apps/livekit-demo/`: `pnpm start` (everything), `pnpm run token-service`,
+`pnpm run server-page`, `pnpm run client-page`, `pnpm run build`,
+`pnpm run typecheck`.
 
-Private demo, not published. MIT © statewalker — see [LICENSE](../../LICENSE).
+### Dependencies
+
+`@statewalker/webrun-streams`, `@statewalker/webrun-streams-livekit`,
+`@statewalker/webrun-http-streams`, `@statewalker/webrun-site-builder`,
+`@statewalker/webrun-site-host`, `livekit-client`, `livekit-server-sdk`. Dev:
+`vite`, `typescript`, `tsx`, `@types/node`, `@statewalker/webrun-http-browser`.
+Docker is needed for the dev LiveKit server. Private, not published.
