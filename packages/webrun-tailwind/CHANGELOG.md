@@ -1,5 +1,15 @@
 # @statewalker/webrun-tailwind
 
+## 0.2.1
+
+### Patch Changes
+
+- Release of the changes since the last published version:
+  
+  - files changed: README.md
+- Updated dependencies
+  - @statewalker/webrun-modules@0.3.3
+
 ## 0.1.2
 
 ### Patch Changes
