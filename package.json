@@ -26,9 +26,7 @@
     "format": "biome format --write .",
     "format:check": "biome format .",
     "typecheck": "pnpm -r run typecheck",
-    "changeset": "changeset",
-    "version-packages": "changeset version",
-    "release-packages": "changeset publish"
+    "changeset": "changeset"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
@@ -36,9 +34,9 @@
     "@types/node": "catalog:",
     "@vitest/coverage-v8": "catalog:",
     "tsx": "catalog:",
+    "turbo": "catalog:",
     "typescript": "catalog:",
-    "vitest": "catalog:",
-    "turbo": "catalog:"
+    "vitest": "catalog:"
   },
   "version": ""
 }
