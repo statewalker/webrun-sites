@@ -1,14 +1,34 @@
 # @statewalker/webrun-builder
 
+## What it is
+
 A generic, host-agnostic **incremental build engine**. `BuildEngine<THost>`
 schedules signal-driven builders over a [`@statewalker/webrun-dataflow`](../webrun-dataflow)
 graph, drives file-backed transaction + updates stores over a
-[`@statewalker/webrun-files`](../webrun-files) `FilesApi`, and detects source
+`@statewalker/webrun-files` `FilesApi`, and detects source
 changes by walking a project tree. It knows nothing about any particular host —
 the `host: THost` you construct it with is passed through to every builder
 untouched.
 
-## The problem it solves
+- A **scheduler.** `run()` repeatedly computes the *frontier* (the latest
+  transaction across all cells) and advances the most-downstream stage that is
+  behind it and whose producers have all caught up. When every stage is at the
+  frontier it scans; a scan that surfaces no change means the pipeline has
+  **converged**.
+- A **built-in scanner.** The reserved `SourceScanner` cell walks the project
+  tree, compares each file's mtime against its last-seen value, and emits
+  `sources` for changes and `sources-removed` tombstones for deletions. It honors
+  a `.projectignore` file (gitignore-style) at the project root, plus an optional
+  caller-supplied ignore predicate.
+- **Durable state.** Updates, per-cell transactions, and the scanner's mtime map
+  are persisted under `rootPath`/`systemFolder`/`state` (as `updates.json`,
+  `transactions.json`, `scanner.json`). Every frontier advance flushes, so a build
+  killed mid-run resumes from its last checkpoint.
+- **Cooperative yielding.** Builders call `yieldControl()` once per processed
+  item; the engine pauses periodically to release the event loop and periodically
+  requests a checkpointed interrupt so the build can be re-seeded on the next pass.
+
+## Why it exists
 
 You have a corpus (a directory of files) and a chain of derivations to keep up to
 date over it: scan sources, extract, split, embed, index, reorganize. When a file
@@ -29,33 +49,31 @@ Whatever context your builders need — including a back-reference to the engine
 they can read their own input deltas — you put on `THost` and the engine hands it
 straight through.
 
-## What it is
+## How to use
 
-- A **scheduler.** `run()` repeatedly computes the *frontier* (the latest
-  transaction across all cells) and advances the most-downstream stage that is
-  behind it and whose producers have all caught up. When every stage is at the
-  frontier it scans; a scan that surfaces no change means the pipeline has
-  **converged**.
-- A **built-in scanner.** The reserved `SourceScanner` cell walks the project
-  tree, compares each file's mtime against its last-seen value, and emits
-  `sources` for changes and `sources-removed` tombstones for deletions. It honors
-  a `.projectignore` file (gitignore-style) at the project root, plus an optional
-  caller-supplied ignore predicate.
-- **Durable state.** Updates, per-cell transactions, and the scanner's mtime map
-  are persisted under `rootPath`/`systemFolder`/`state` (as `updates.json`,
-  `transactions.json`, `scanner.json`). Every frontier advance flushes, so a build
-  killed mid-run resumes from its last checkpoint.
-- **Cooperative yielding.** Builders call `yieldControl()` once per processed
-  item; the engine pauses periodically to release the event loop and periodically
-  requests a checkpointed interrupt so the build can be re-seeded on the next pass.
-
-## Install
+### Install
 
 ```sh
-npm add @statewalker/webrun-builder
+pnpm add @statewalker/webrun-builder
 ```
 
-## Quick start
+Runtime dependencies: `@statewalker/webrun-dataflow` and `@statewalker/webrun-files`.
+No peer dependencies. You also need a `FilesApi` implementation, for example
+`@statewalker/webrun-files-mem` or `@statewalker/webrun-files-node`.
+
+### One entry point; all I/O goes through a `FilesApi`
+
+One entry point, `@statewalker/webrun-builder` (ESM, built to `dist/`; the
+TypeScript sources ship in `src/`). It does not use Node built-ins; all I/O goes
+through the injected `FilesApi`, so it runs wherever that implementation runs.
+
+Exports: `BuildEngine`, `NULL_LOGGER`, `SCAN_CELL`, `SOURCES_SIGNAL`,
+`SOURCES_REMOVED_SIGNAL`, `makeProjectIgnore`, `compileIgnoreRules`, and the types
+`BuildContext`, `YieldConfig`, `Logger`, `IgnoreRule`, `BuilderHandler`,
+`BuilderProvider`, `BuilderStatus`, `BuilderUpdate`, `BuildProgress`,
+`BuildStatus`, `EmittedUpdate`, `RegisteredBuilder`, `SignalName`.
+
+### Register builders, then run to convergence
 
 A builder is an async generator over the injected host. It reads its input deltas,
 does its work, `yield`s output updates for downstream builders, and returns `true`
@@ -104,7 +122,7 @@ for await (const progress of engine.run()) {
 }
 ```
 
-## Constructor
+### The constructor takes a `BuildContext` plus the host
 
 ```ts
 new BuildEngine<THost>(opts: BuildContext & { host: THost })
@@ -121,7 +139,120 @@ interface BuildContext {
 logs*. The generic `host` is carried alongside — not part of `BuildContext` — and
 is what each builder handler receives.
 
-## Builders
+### `BuildEngine` methods
+
+Methods on `BuildEngine<THost>`:
+
+- **`registerBuilder(builder): () => void`** — register a builder; returns an
+  unregister function. The id `SourceScanner` is reserved (throws). Registering or
+  unregistering invalidates the cached graph topology.
+- **`run(opts?): AsyncGenerator<BuildProgress>`** — run the scanner plus the
+  registered builders in dependency order, to convergence, yielding per-stage
+  progress. `opts.builders` restricts the run to a subset (and skips scanning). If
+  any stage throws, the first error is re-thrown after state is flushed.
+- **`readUpdates({ signal, cell }): AsyncIterable<BuilderUpdate>`** — the
+  un-handled updates on `signal` for builder `cell`, in URI order. A builder calls
+  this (via the host) to drain its own input.
+- **`yieldControl(): Promise<boolean>`** — cooperative yield point; builders call
+  it once per processed item. Pauses periodically to release the event loop;
+  returns `false` periodically (after checkpointing durable state) to ask the
+  builder to interrupt so `run()` can re-seed it.
+- **`restartFrom(builderId): Promise<void>`** — reset `builderId` and every builder
+  downstream of it: clear their handled + transaction watermarks so the next
+  `run()` re-derives them. Upstream builders are untouched.
+- **`status(): Promise<BuildStatus>`** — per-builder pending-update counts and
+  last-run transaction ids, plus the next transaction id.
+- **`configureYield(partial): this`** — override the cooperative-yield throttle
+  (`YieldConfig`: `pauseEvery`, `pauseMs`, `interruptEvery`, `maxStalledPasses`,
+  `scanBatchSize`).
+- **`configureSourceIgnore(provider): this`** — inject an extra source-exclusion
+  predicate, composed (logical OR) with `.projectignore` and re-read at the start
+  of every scan. A uri the predicate excludes is treated exactly like a
+  `.projectignore` match (kept out of the source set, pruned via `sources-removed`
+  if previously indexed).
+
+### The scanner's cell id and signals are reserved
+
+```ts
+const SCAN_CELL = "SourceScanner";           // the built-in scanner cell id
+const SOURCES_SIGNAL = "sources";            // emitted for changed sources
+const SOURCES_REMOVED_SIGNAL = "sources-removed"; // emitted for deletions
+```
+
+## Examples
+
+### `BuildEngine`: drain sources, check status, re-run one stage
+
+```ts
+import { BuildEngine, SOURCES_SIGNAL } from "@statewalker/webrun-builder";
+import { MemFilesApi } from "@statewalker/webrun-files-mem";
+
+interface Host {
+  engine: BuildEngine<Host>;
+}
+
+const files = new MemFilesApi();
+await files.write("proj/a.txt", [new TextEncoder().encode("hi")]);
+
+const host = {} as Host;
+const engine = new BuildEngine<Host>({
+  files,
+  rootPath: "proj",
+  systemFolder: ".project",
+  logger: console,
+  host,
+});
+host.engine = engine;
+
+engine.registerBuilder({
+  id: "Indexer",
+  inputs: [SOURCES_SIGNAL],
+  outputs: ["indexed"],
+  handler: async function* (h) {
+    for await (const u of h.engine.readUpdates({ signal: SOURCES_SIGNAL, cell: "Indexer" })) {
+      yield { signal: "indexed", uri: u.uri, stamp: u.stamp };
+      await u.handled();
+      // Give the event loop a turn; `false` means "stop now, run() will call you again".
+      if (!(await h.engine.yieldControl())) return false;
+    }
+    return true;
+  },
+});
+
+for await (const _ of engine.run()) {
+  // drain to convergence
+}
+await engine.status();
+// → { nextTransactionId: 3, builders: [{ id: "Indexer", pending: 0, lastTransaction: 1 }] }
+
+await engine.restartFrom("Indexer");
+await engine.status();
+// → { nextTransactionId: 3, builders: [{ id: "Indexer", pending: 1, lastTransaction: 0 }] }
+```
+
+State is written to `proj/.project/state/` as `updates.json`, `transactions.json`
+and `scanner.json`.
+
+### `makeProjectIgnore`: gitignore-style exclusion
+
+```ts
+import { makeProjectIgnore } from "@statewalker/webrun-builder";
+
+const ignored = makeProjectIgnore("*.log\nbuild/\n!build/keep.txt");
+ignored("app.log");        // → true
+ignored("build/out.js");   // → true
+ignored("build/keep.txt"); // → false (negation; last matching rule wins)
+```
+
+`compileIgnoreRules(text)` returns the parsed `IgnoreRule[]` behind it.
+
+### `NULL_LOGGER`: silence the engine
+
+Pass `logger: NULL_LOGGER` instead of `console` to drop all engine logging.
+
+## Internals
+
+### A builder is an async generator over the host
 
 ```ts
 type SignalName = string;
@@ -166,47 +297,7 @@ interface BuilderUpdate {
 A `BuilderProvider<THost>` (`{ builders(): readonly RegisteredBuilder<THost>[] }`)
 lets a host's "nature" contribute a set of builders in one place.
 
-## Public API
-
-Methods on `BuildEngine<THost>`:
-
-- **`registerBuilder(builder): () => void`** — register a builder; returns an
-  unregister function. The id `SourceScanner` is reserved (throws). Registering or
-  unregistering invalidates the cached graph topology.
-- **`run(opts?): AsyncGenerator<BuildProgress>`** — run the scanner plus the
-  registered builders in dependency order, to convergence, yielding per-stage
-  progress. `opts.builders` restricts the run to a subset (and skips scanning). If
-  any stage throws, the first error is re-thrown after state is flushed.
-- **`readUpdates({ signal, cell }): AsyncIterable<BuilderUpdate>`** — the
-  un-handled updates on `signal` for builder `cell`, in URI order. A builder calls
-  this (via the host) to drain its own input.
-- **`yieldControl(): Promise<boolean>`** — cooperative yield point; builders call
-  it once per processed item. Pauses periodically to release the event loop;
-  returns `false` periodically (after checkpointing durable state) to ask the
-  builder to interrupt so `run()` can re-seed it.
-- **`restartFrom(builderId): Promise<void>`** — reset `builderId` and every builder
-  downstream of it: clear their handled + transaction watermarks so the next
-  `run()` re-derives them. Upstream builders are untouched.
-- **`status(): Promise<BuildStatus>`** — per-builder pending-update counts and
-  last-run transaction ids, plus the next transaction id.
-- **`configureYield(partial): this`** — override the cooperative-yield throttle
-  (`YieldConfig`: `pauseEvery`, `pauseMs`, `interruptEvery`, `maxStalledPasses`,
-  `scanBatchSize`).
-- **`configureSourceIgnore(provider): this`** — inject an extra source-exclusion
-  predicate, composed (logical OR) with `.projectignore` and re-read at the start
-  of every scan. A uri the predicate excludes is treated exactly like a
-  `.projectignore` match (kept out of the source set, pruned via `sources-removed`
-  if previously indexed).
-
-### Reserved names
-
-```ts
-const SCAN_CELL = "SourceScanner";           // the built-in scanner cell id
-const SOURCES_SIGNAL = "sources";            // emitted for changed sources
-const SOURCES_REMOVED_SIGNAL = "sources-removed"; // emitted for deletions
-```
-
-## The scanner and `.projectignore`
+### The scanner compares mtimes and honors `.projectignore`
 
 The built-in scanner walks `rootPath` recursively, skipping any path with a
 dot-segment (the system folder, `.git`, manifests, …). For each file it compares
@@ -216,26 +307,15 @@ caps how many changed sources are emitted per scan (in URI order) so each batch
 flows through the whole pipeline before the next is picked up; the full tree is
 always walked so removals are detected regardless of the batch limit.
 
-`.projectignore` at the project root is a pragmatic gitignore-style exclusion
-list, exposed as standalone helpers:
-
-```ts
-import { makeProjectIgnore, compileIgnoreRules } from "@statewalker/webrun-builder";
-
-const ignored = makeProjectIgnore("*.log\nbuild/\n!build/keep.txt");
-ignored("app.log");        // → true
-ignored("build/out.js");   // → true
-ignored("build/keep.txt"); // → false (negation; last matching rule wins)
-```
-
-Supported subset: `#` comments and blank lines; `!pattern` negation (last match
+`.projectignore` at the project root is a gitignore-style exclusion list, parsed by
+`makeProjectIgnore` (see Examples). Supported subset: `#` comments and blank lines; `!pattern` negation (last match
 wins); `*` within a segment, `**` across segments, `?` one non-slash char; a
 pattern with a `/` is anchored to the root, otherwise it matches a name at any
 depth; a trailing `/` marks a directory (its subtree is matched). Adding a rule
 prunes a previously-indexed source's artifacts, because it is emitted as
 `sources-removed` once excluded.
 
-## Logging
+### The logger is a local structural interface
 
 The engine writes to a **local structural `Logger`** — any object with `info`,
 `warn`, `error`, and `debug` methods (`console` satisfies it). This is defined in
@@ -252,7 +332,7 @@ interface Logger {
 }
 ```
 
-## Progress and status
+### Progress and status shapes
 
 ```ts
 type BuildProgress =
@@ -266,7 +346,19 @@ interface BuildStatus {
 }
 ```
 
-## Dependencies
+### What breaks, and what it looks like
+
+- Registering a builder with the id `SourceScanner` throws
+  `Builder id "SourceScanner" is reserved for the source scanner`.
+- A builder that never drains its input (keeps returning `false` without calling
+  `handled()`), or throws before handling anything, stalls the run. After
+  `maxStalledPasses` (default 8) passes without progress, `run()` throws
+  `BuildEngine.run: no scheduling progress for 8 consecutive passes (stuck at "<id>"); a builder is not draining its input or repeatedly throws`.
+- If a stage throws, the run continues to flush state, then re-throws the first error.
+- Scanning skips every path with a dot-segment. Sources under `.github/` or other
+  dot-folders are never built.
+
+### Two runtime dependencies, no logging dependency
 
 Runtime: `@statewalker/webrun-dataflow` (topology + stores) and
 `@statewalker/webrun-files` (`FilesApi`). No logging dependency — the `Logger` is

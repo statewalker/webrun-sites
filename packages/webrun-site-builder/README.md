@@ -1,11 +1,12 @@
 # @statewalker/webrun-site-builder
 
+## What it is
+
 Compose a **`SiteHandler = (Request) ⇒ Promise<Response>`** from three ingredients:
 
-- **Static files** from any
-  [`@statewalker/webrun-files`](https://github.com/statewalker/webrun-files)
-  source — memory, Node FS, S3, the browser's File System Access API, or a
-  `CompositeFilesApi` stitching several together.
+- **Static files** from any `@statewalker/webrun-files` `FilesApi` — memory,
+  Node FS, S3, the browser's File System Access API, or a `CompositeFilesApi`
+  stitching several together.
 - **Dynamic endpoints** registered as
   `(Request, env) ⇒ Response` functions with URLPattern-based
   matching (`/todo/:id`, `/api/*`, …). `env` carries the per-request
@@ -20,8 +21,8 @@ definition and platform hosting. The same handler drops into every host:
 
 | Host | Package |
 | --- | --- |
-| Browser + ServiceWorker | [`HostedSiteBuilder`](../webrun-site-host) |
-| Any `webrun-streams-*` transport (MessagePort, WebSocket, WebRTC, libp2p, …) | [`DuplexSiteBuilder`](../webrun-http-streams) |
+| Browser + ServiceWorker | `HostedSiteBuilder` from [`@statewalker/webrun-site-host`](../webrun-site-host) |
+| Any `webrun-streams-*` transport (MessagePort, WebSocket, WebRTC, libp2p, …) | `DuplexSiteBuilder` from `@statewalker/webrun-http-streams` |
 | Node / Deno / Bun / Cloudflare Workers | none needed — a `SiteHandler` *is* their handler shape |
 
 ```ts
@@ -50,30 +51,22 @@ small MIME map labels files, `FilesApi.stats()` + `read({start, length})`
 handle Content-Length + `Range` requests, and auth is a single hook
 returning a short-circuiting `Response`.
 
-## Install
-
-```sh
-npm install @statewalker/webrun-site-builder @statewalker/webrun-files
-```
-
-[`@statewalker/webrun-files`](https://github.com/statewalker/webrun-files) is a
-**peer dependency** (`^0.7.0`) — it supplies the `FilesApi` interface that
-`setFiles` mounts. Pick an implementation to go with it:
-`@statewalker/webrun-files-mem` (in-memory), `-node` (Node FS) or `-browser`
-(File System Access API).
-
-No other runtime dependencies. ESM only (`"type": "module"`).
-
 ## How to use
 
+### Install it with a `FilesApi` implementation
+
 ```sh
-npm install @statewalker/webrun-site-builder @statewalker/webrun-files
+pnpm add @statewalker/webrun-site-builder @statewalker/webrun-files
 ```
 
-(You'll also need a concrete `FilesApi` — e.g.
-`@statewalker/webrun-files-mem`, `@statewalker/webrun-files-node`,
-`@statewalker/webrun-files-s3`, or
-`@statewalker/webrun-files-browser`.)
+`@statewalker/webrun-files` is a **peer dependency** (`^0.9.0 || ^0.10.0`) — it
+supplies the `FilesApi` interface that `setFiles` mounts. Pick an implementation
+to go with it: `@statewalker/webrun-files-mem` (in-memory), `-node` (Node FS),
+`-s3` or `-browser` (File System Access API).
+
+No other runtime dependencies. One entry point, `@statewalker/webrun-site-builder`
+(ESM, built to `dist/`; TypeScript sources in `src/`). It runs in browsers,
+ServiceWorkers, Node 24, Deno, Bun and Workers.
 
 ### Exports
 
@@ -98,15 +91,21 @@ import { MemFilesApi } from "@statewalker/webrun-files-mem";
 import { SiteBuilder } from "@statewalker/webrun-site-builder";
 
 const files = new MemFilesApi({
-  "/index.html": "<!doctype html><h1>Hello</h1>",
-  "/style.css": "h1 { color: navy }",
+  initialFiles: {
+    "/index.html": "<!doctype html><h1>Hello</h1>",
+    "/style.css": "h1 { color: navy }",
+  },
 });
 
-const handler = new SiteBuilder().setFiles("/", files).build();
+const handler = new SiteBuilder()
+  .setFiles("/", files, { directoryIndex: "index.html" })
+  .build();
+
+await handler(new Request("http://localhost/style.css")); // → 200, text/css; charset=utf-8
 // → pass `handler` to any fetch-shaped transport.
 ```
 
-### Static + dynamic API
+### Static files plus a dynamic API; endpoints win over files
 
 ```ts
 import { SiteBuilder } from "@statewalker/webrun-site-builder";
@@ -122,7 +121,7 @@ const handler = new SiteBuilder()
 Endpoints are checked **before** files, so an endpoint at `/api/...`
 will answer even if `files` contains an `api/` folder.
 
-### Sharing values across endpoints with `setEnv`
+### `setEnv` shares values with every endpoint
 
 `setEnv` merges values into the `env` bag every endpoint receives,
 so handlers don't have to close over module-level state:
@@ -131,7 +130,8 @@ so handlers don't have to close over module-level state:
 const handler = new SiteBuilder()
   .setEnv({ db, secrets, files })
   .setEndpoint("/api/todo/:id", "GET", async (_req, env) => {
-    const row = await env.db.todo.get(env.params.id);
+    const db = env.db as TodoDb; // env values are `unknown`; cast to your type
+    const row = await db.todo.get(env.params.id);
     return Response.json(row);
   })
   .build();
@@ -142,14 +142,14 @@ there is no "what if a key is named `params`" foot-gun. The bag is
 snapshotted at `build()` time; later `setEnv` calls don't leak into
 already-built handlers.
 
-### Multiple file roots
+### Several file roots, each under its own prefix
 
 `setFiles` takes a prefix so you can mount several `FilesApi`
 implementations side-by-side on the same site:
 
 ```ts
-const serverFiles = new MemFilesApi({ "/api/index.js": "export default…" });
-const clientFiles = new MemFilesApi({ "/index.html": "<!doctype…" });
+const serverFiles = new MemFilesApi({ initialFiles: { "/api/index.js": "export default…" } });
+const clientFiles = new MemFilesApi({ initialFiles: { "/index.html": "<!doctype…" } });
 
 const handler = new SiteBuilder()
   .setFiles("/server", serverFiles)
@@ -163,7 +163,8 @@ const handler = new SiteBuilder()
 
 (The dynamic-import pattern above is what the
 [`apps/site-builder-demo`](../../apps/site-builder-demo) example
-uses on top of `@statewalker/webrun-http-browser`'s relay — the
+uses on top of `@statewalker/webrun-http-browser`'s relay; `newServerRunner`
+in `@statewalker/webrun-site-host` packages it. The
 `server/api/index.js` file is served as JS by `serverFiles`, then
 `import()`-ed from the page and invoked per request.)
 
@@ -184,7 +185,7 @@ header: missing or invalid credentials return a 401 with
 `WWW-Authenticate`; valid credentials let the request through to the
 next layer.
 
-### Custom auth (bearer / JWT / API key / …)
+### Any predicate can be an auth hook
 
 `setAuth` takes any predicate of shape
 `(Request) ⇒ Response | undefined | Promise<Response | undefined>`.
@@ -201,7 +202,7 @@ request through.
 })
 ```
 
-### Error handler
+### A custom error handler replaces the plain 500
 
 ```ts
 .setErrorHandler((error, request) => {
@@ -214,7 +215,7 @@ Default is a plain `500 Internal Server Error` when any layer throws.
 
 ## Internals
 
-### Dispatch order
+### Dispatch order is fixed: auth, endpoints, files, 404
 
 On each request, the handler built by `.build()` runs three layers, then
 falls through, in this fixed order:
@@ -235,7 +236,7 @@ falls through, in this fixed order:
 
 Any uncaught throw in any layer is routed to the error handler.
 
-### File serving
+### File serving supports HEAD and single byte ranges
 
 `serve-files.ts` implements:
 
@@ -252,7 +253,7 @@ Any uncaught throw in any layer is routed to the error handler.
   static-site fallback with `{ directoryIndex: "index.html" }`; if set
   but the index is missing the response is still `404`.
 
-### URL patterns
+### Routes are `URLPattern` pathnames
 
 `match-route.ts` wraps the standard `URLPattern` API. Named params
 (`:id`) and wildcards (`*`, `:rest*`) are both exposed in the
@@ -261,7 +262,7 @@ returned params object; wildcards appear under numeric keys
 Methods are compared case-insensitively; `*` and `ALL` match every
 verb.
 
-### Basic auth
+### Basic auth follows RFC 7617
 
 `basic-auth.ts` implements RFC 7617 (`charset=UTF-8`):
 
@@ -272,7 +273,7 @@ verb.
 - Returns a fresh `Response` on every failure (challenge bodies can
   only be consumed once, so cloning per-call is required).
 
-### Design notes
+### Why there is no middleware chain
 
 - **No middleware chain.** The three layers are fixed; extension
   lives inside endpoint handlers (wrap them to add logging, CORS,
@@ -296,11 +297,13 @@ verb.
   erased at compile time; the built bundle contains zero bare
   imports. Consumers pick any FilesApi implementation they want.
 
-### Constraints
+### What it does not do, and what fails
 
-- **URLPattern required.** Node 18+ and all modern browsers ship
-  it. For older Node, pre-load `urlpattern-polyfill` before
-  importing this package.
+- **URLPattern required.** Node 24 and current browsers have it as a
+  global. Where it is missing, importing works but the first `setEndpoint`
+  or `setAuth` call fails with
+  `ReferenceError: URLPattern is not defined`; load `urlpattern-polyfill`
+  first.
 - **Exact-path file serving.** A request whose resolved path is a
   directory returns `404` unless you opt in to a `directoryIndex`.
   No HTML file listings either; add a `setEndpoint("/browse/*", …)`
@@ -310,21 +313,13 @@ verb.
   fetches. Add a custom endpoint layer if you need full cache
   negotiation.
 
-### Dependencies
+### Zero runtime dependencies
 
 Runtime: **zero**. `@statewalker/webrun-files` is a peer dependency
 (type only).
 
 Dev: `@statewalker/webrun-files-mem` (for tests), TypeScript,
-vitest, rolldown, rimraf, catalog versions from the monorepo root.
-
-## Scripts
-
-```sh
-pnpm test        # vitest run
-pnpm run build   # rolldown + tsc --emitDeclarationOnly
-pnpm lint        # biome check src tests
-```
+vitest, rolldown, rimraf.
 
 ## License
 

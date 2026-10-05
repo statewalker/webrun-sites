@@ -1,5 +1,7 @@
 # @statewalker/webrun-modules
 
+## What it is
+
 Run authored TypeScript/JavaScript apps **and the arbitrary npm modules they
 import** in the browser (or Node) with **no runtime CDN dependency** — and with
 **no install step**: packages are downloaded, resolved, and transformed **on
@@ -16,13 +18,52 @@ runtime can `import` directly — no bespoke client loader.
 It is **isomorphic**: the same code runs in a browser ServiceWorker and in Node —
 the only difference is which `FilesApi` backend you inject.
 
-## Install
+## Why it exists
+
+Running authored TypeScript and npm packages in a browser usually needs an
+install step and a bundler before anything runs, or an import map pointing at a
+public CDN, which then becomes a run-time dependency. This package does both jobs
+on request instead: it fetches the package tarball from the registry, transforms
+each file to ESM, and serves it from a cache you own. After the first request (or
+after `prime`), nothing is fetched from a third party, and the cache works
+offline.
+
+The same server covers first-party code: it transpiles TS/TSX and rewrites bare
+imports, so one `newModuleServer` does what otherwise takes a resolver, CDN
+providers, a specifier-rewriting pass and a prefetch step (the
+`site-builder-jspm-demo` app in this repository shows that alternative).
+
+## How to use
+
+### Install
 
 ```sh
-npm add @statewalker/webrun-modules
+pnpm add @statewalker/webrun-modules
 ```
 
-## Quick start
+### One entry point; the environment is set by the `FilesApi`
+
+`@statewalker/webrun-modules` has one entry point (ESM, built to `dist/`; the
+TypeScript sources ship in `src/`). The code uses no Node built-ins: it needs
+`fetch`, `Request`/`Response` and a `FilesApi`, so it runs in Node, browsers,
+ServiceWorkers, Deno, Bun and Workers.
+
+Main exports: `newModuleServer`, `npmRegistrySource`, the transform factories
+(`newDefaultTransform`, `newEsmTransform`, `newCjsTransform`,
+`newDefaultCssTransform`, `newLightningCssTransform`), `detectFormat`, the
+errors `ModuleResolveError` and `ModuleTransformError`, the CORS helpers, and
+the utilities listed under Internals. The preprocess core used by
+`@statewalker/webrun-modules-build` is exported too (`preprocessModule`,
+`walkFrom`, `newTransformRegistry`, `newDefaultTransformRegistry`,
+`detectInputType`, `makeKeepExtPolicy`, `resolveSpec`, and the
+`PreprocessContext`, `RegisteredTransform` and `UrlPolicy` types).
+
+Runtime dependencies: `@statewalker/webrun-files` and
+`@statewalker/webrun-files-mem`, plus the third-party packages listed under
+Internals. No peer dependencies. For a disk cache under Node, add
+`@statewalker/webrun-files-node`.
+
+### Resolve a package and serve it with `server.fetch`
 
 ```ts
 import { newModuleServer, npmRegistrySource } from "@statewalker/webrun-modules";
@@ -53,7 +94,7 @@ const res = await server.fetch(new Request("http://host/ms@2.1.3/index.js"));
 // → 200, content-type: text/javascript
 ```
 
-## Eager priming (optional)
+### `prime` downloads a whole graph up front
 
 To download and transform a whole dependency graph up front (e.g. before going
 offline, or to warm a cache), use `prime`. It walks the entry's transitive graph,
@@ -64,7 +105,7 @@ await server.prime({ pkg: "react-dom", version: "^18" });
 // entry + every transitive dep are now cached and importable with the network off.
 ```
 
-## Listing what an entry needs, or what a package contains
+### `listResources` lists what an entry needs; `listPackageFiles` lists what a package ships
 
 Two questions, two methods:
 
@@ -95,7 +136,7 @@ await server.prime({ pkg: "react", subpath: "jsx-runtime" }); // if you use JSX
 // ./react-bundle/t/browser/react@19.2.8/… now holds the importable scripts.
 ```
 
-## Serving your own source too
+### The same server serves your own TS/TSX
 
 Point the server at a project `FilesApi` and it resolves local scripts the same
 way — bare imports rewritten to `/{name}@{version}/…`, relative imports kept
@@ -106,10 +147,164 @@ const server = newModuleServer({ cache, project: myProjectFiles });
 const app = await server.resolve({ url: "/src/app.ts" }); // → importable URL
 ```
 
+### `newModuleServer` options
+
+| Option      | Default                  | Purpose |
+|-------------|--------------------------|---------|
+| `cache`     | — (required)             | Injected `FilesApi` for the module cache. |
+| `project`   | —                        | `FilesApi` of local project files to serve. |
+| `sources`   | `[npmRegistrySource()]`  | Acquisition sources (npm tarball by default). |
+| `transform` | `newDefaultTransform()`  | Per-file transform (ESM + CJS-interop). |
+| `css`       | `newDefaultCssTransform()` | Per-file CSS transform (Lightning CSS). |
+| `target`    | `"browser"`              | Selects `exports` conditions + cache key; `"node"` supported. |
+| `lock`      | —                        | A `Lockfile` (pins versions); `prime` also writes one back. |
+| `basePath`  | `"/"`                    | Mount prefix, e.g. `"/deps/v1/"`. |
+| `depsPath`  | `""`                     | Prefix under `basePath` isolating external package URLs, e.g. `"deps/"`. |
+| `depsFolder`| `"~deps"`                | Per-module-root folder holding dependency proxies (see below). A reserved path segment. |
+| `provided`  | —                        | Names bound to live host instances (see [the `~deps` proxy layer](#every-external-reference-goes-through-one-deps-proxy-per-module-root)). |
+| `globals`   | —                        | Extends/overrides the injectable free-global allowlist. |
+| `resolveEndpoint` | —                  | Swaps the linker deciding how a bare specifier binds. |
+| `cors`      | —                        | `true` → permissive CORS on every response; a record → exactly those headers. |
+
+### The `ModuleServer` interface
+
+```ts
+interface ModuleServer {
+  resolve(ref: ModuleRef, importer?: string): Promise<ResolvedModule>; // single ref → URL
+  prime(entry: ModuleRef): Promise<ResolvedModule>;                    // warm the whole graph
+  listResources(entry: ModuleRef): Promise<string[]>;                  // every URL the entry needs
+  listPackageFiles(ref: ModuleRef): Promise<string[]>;                 // a package's full file list
+  fetch(request: Request): Promise<Response>;                          // standard Web handler
+  readonly lock: Lockfile;                                             // resolution map
+}
+
+type ModuleRef =
+  | { pkg: string; version?: string; subpath?: string } // e.g. { pkg: "lodash-es", subpath: "merge" }
+  | { url: string };                                     // a local project script
+```
+
 ## Examples
 
-Four runnable examples (each has a package script; all hit the live npm
-registry, so they need network on first run):
+### `target` picks browser or Node builds, cached separately
+
+`target` selects which `package.json` `exports` conditions win and how Node
+builtins are handled, and is part of the cache key (a browser build and a node
+build of the same package never collide):
+
+```ts
+// Browser (default): node:* builtins → self-hosted @jspm/core polyfill URLs.
+newModuleServer({ cache, target: "browser" });
+
+// Node: node:* builtins stay external (real Node builtins).
+newModuleServer({ cache, target: "node" });
+```
+
+### A lockfile pins versions
+
+The resolution map is a `Lockfile` (`{ [name]: version }`). `prime` writes it to
+the cache and returns it via `server.lock`. Supply it back as `lock` to pin
+versions reproducibly — a partial lockfile pins only the names it lists:
+
+```ts
+const first = newModuleServer({ cache });
+await first.prime({ pkg: "app" });
+const lock = first.lock; // e.g. { app: "1.0.0", react: "18.3.1", … }
+
+// Elsewhere / later: identical resolution, no re-solve.
+const pinned = newModuleServer({ cache, lock });
+```
+
+### A custom `Source` loads packages from your own registry
+
+A `Source` turns a reference into a package's files + manifest. The default is
+`npmRegistrySource()`; provide your own (or several — the first whose `matches`
+returns true wins):
+
+```ts
+import type { Source } from "@statewalker/webrun-modules";
+import { MemFilesApi } from "@statewalker/webrun-files-mem";
+
+const myRegistry: Source = {
+  matches: (ref) => "pkg" in ref,
+  async load(ref) {
+    // fetch + unpack however you like; return the package tree + manifest
+    const files = new MemFilesApi();
+    // … write files …
+    return { name: ref.pkg, version: "1.0.0", files, manifest: { name: ref.pkg, version: "1.0.0" } };
+  },
+};
+
+newModuleServer({ cache, sources: [myRegistry, npmRegistrySource()] });
+```
+
+`npmRegistrySource(options?)` accepts `{ registryUrl, fetch, createFiles }` — pass
+a custom `fetch` (e.g. to add auth or point at a private registry) or a private
+registry URL.
+
+### A custom `Transform` replaces the JS pipeline
+
+The default transform (`newDefaultTransform()`) dispatches per file: ESM/TS/JSX go
+through `newEsmTransform()`, CommonJS through `newCjsTransform()`. Swap in your own
+`Transform` — it receives one file and a `rewrite(specifier) => url | undefined`
+callback and returns browser-runnable ESM:
+
+```ts
+import { newDefaultTransform, detectFormat } from "@statewalker/webrun-modules";
+import type { Transform } from "@statewalker/webrun-modules";
+
+const myTransform: Transform = {
+  async transform(file, rewrite) {
+    // file = { path, source, format: "esm" | "cjs" | "ts" | "tsx" }
+    // call rewrite(spec) for each import specifier to get its local URL.
+    // `undefined` means the specifier cannot be placed: do not link it. A CJS
+    // transform leaves it out of its require map so `require` throws at the CALL
+    // site (see the optional-`require` note under Limitations); an ESM transform
+    // has no call site to throw at, so it keeps the original specifier and lets
+    // the link fail loudly.
+    return /* transformed ESM */ file.source;
+  },
+};
+
+newModuleServer({ cache, transform: myTransform });
+```
+
+`detectFormat(path, source, manifest?)` returns the `SourceFormat` the default
+transform would infer.
+
+### Serve a whole site: module server plus `SiteBuilder`
+
+Because the server transpiles first-party TS/TSX **and** resolves the npm deps,
+one `newModuleServer` replaces an entire `@jspm/generator`-based pipeline
+(resolver + CDN providers + `es-module-lexer` rewrite + recursive prefetch +
+`/external` mount). Put your source in a `project` `FilesApi`, mount `server.fetch`
+under a site, and run server modules through the existing server-runner:
+
+```ts
+import { newModuleServer } from "@statewalker/webrun-modules";
+import { SiteBuilder } from "@statewalker/webrun-site-builder";
+import { newServerRunner } from "@statewalker/webrun-site-host";
+
+const server = newModuleServer({ cache, project: myAppFiles, target: "browser" });
+
+new SiteBuilder()
+  .setEndpoint("/", server.fetch)                                  // html + transpiled TSX + deps
+  .setEndpoint("/api", newServerRunner(serverEntryUrl, () => baseUrl)) // run server modules
+  .build();
+```
+
+[`examples/site-pipeline.ts`](./examples/site-pipeline.ts) runs the whole thing
+(JSX/TSX transpiled, `import "react"` rewritten to a same-origin URL, `react` +
+`react/jsx-runtime` resolved, `listResources` = the exact scripts to serve).
+**Note:** the server resolves a bare `import "react"` to *latest* unless a version
+is pinned — seed `lock` (e.g. `{ react: "18.3.1" }`) to honor a project's
+`package.json` versions reproducibly.
+
+### Runnable examples in the repository
+
+Five runnable examples live in [`examples/`](./examples) in the repository; they
+are not part of the npm package. Each has a package script, and all hit the live
+npm registry, so they need network on first run. Run them from a checkout after
+`pnpm install`:
 
 ```sh
 pnpm --filter @statewalker/webrun-modules example              # full-cycle (alias)
@@ -117,6 +312,7 @@ pnpm --filter @statewalker/webrun-modules example:full-cycle   # examples/full-c
 pnpm --filter @statewalker/webrun-modules example:server       # examples/http-server.ts (unpkg-like)
 pnpm --filter @statewalker/webrun-modules example:tsx-page     # examples/tsx-page.ts (a React page in a browser)
 pnpm --filter @statewalker/webrun-modules example:site         # examples/site-pipeline.ts
+pnpm --filter @statewalker/webrun-modules example:verify       # examples/verify-deps-layout.ts
 ```
 
 (From inside the package directory you can drop the `--filter …` prefix:
@@ -126,7 +322,7 @@ pnpm --filter @statewalker/webrun-modules example:site         # examples/site-p
 cycle against the live npm registry — lazy download-on-request, `resolve`,
 `prime`, executing a served module, `?raw`, and the lockfile.
 
-### An unpkg-like HTTP service
+#### An unpkg-like HTTP service
 
 Because `server.fetch` is a standard Web handler, exposing an unpkg-style endpoint
 is a thin wrapper — mount it on any host and add the one convenience of
@@ -156,7 +352,7 @@ point back at the same server. Use it straight from a browser:
 </script>
 ```
 
-### A TSX page in a browser — no install, no build
+#### A TSX page in a browser, with no install and no build
 
 [`examples/tsx-page.ts`](./examples/tsx-page.ts) serves an interactive React page
 whose source is `.tsx`, with no `npm install react` and no bundler anywhere in the
@@ -190,153 +386,81 @@ editing a source file does not invalidate it — a reload still serves the old
 module. The example takes a fresh temp cache per run, so restarting it suffices; a
 watch-mode dev loop would need the cached artifact evicted on change.
 
-### In-browser site pipeline (replacing a jspm-based resolver)
+## Internals
 
-Because the server transpiles first-party TS/TSX **and** resolves the npm deps,
-one `newModuleServer` replaces an entire `@jspm/generator`-based pipeline
-(resolver + CDN providers + `es-module-lexer` rewrite + recursive prefetch +
-`/external` mount). Put your source in a `project` `FilesApi`, mount `server.fetch`
-under a site, and run server modules through the existing server-runner:
+### Acquire, resolve, transform: one file in, one ESM file out
 
-```ts
-const server = newModuleServer({ cache, project: myAppFiles, target: "browser" });
+- **Acquire** — the default `Source` fetches the npm registry tarball, untars it
+  in memory (pure-JS, isomorphic), and caches every file.
+- **Resolve** — versions resolve against the registry with whole-name dedupe (one
+  version per package where semver allows; incompatible ranges are kept side by
+  side). `package.json` `exports`/`imports` conditions are honored for the target;
+  Node builtins map to `@jspm/core` polyfills (browser) or stay external (node).
+  The resolution map is persisted as a lockfile.
+- **Transform** — each file becomes browser-runnable ESM one-to-one. ESM/TS/JSX is
+  transpiled and its specifiers rewritten in place; CommonJS is wrapped so the ESM
+  module graph itself provides `require` (synchronously, backed by the eagerly
+  primed graph). A CJS module's body runs inside a deferred `__cjsExec()` factory
+  rather than at module-evaluation time, which keeps CJS's lazy ordering: a
+  circular `require` re-enters that factory and receives the exports published so
+  far, exactly as Node does. That is what makes the common cycle idiom — assign
+  `module.exports`, *then* require your partner — work for packages that rely on
+  it, semver among them. A transformed CJS module therefore carries one extra
+  export, `__cjsExec`, visible in its namespace object. Internal imports are
+  rewritten as **relative** URLs, so cached bytes are portable across mount
+  prefixes.
 
-new SiteBuilder()
-  .setEndpoint("/", server.fetch)                                  // html + transpiled TSX + deps
-  .setEndpoint("/api", newServerRunner(serverEntryUrl, () => baseUrl)) // run server modules
-  .build();
-```
+### What `fetch` returns for each kind of path
 
-[`examples/site-pipeline.ts`](./examples/site-pipeline.ts) runs the whole thing
-(JSX/TSX transpiled, `import "react"` rewritten to a same-origin URL, `react` +
-`react/jsx-runtime` resolved, `listResources` = the exact scripts to serve).
-**Note:** the server resolves a bare `import "react"` to *latest* unless a version
-is pinned — seed `lock` (e.g. `{ react: "18.3.1" }`) to honor a project's
-`package.json` versions reproducibly.
+`server.fetch(request)` is a plain `(Request) => Promise<Response>`:
 
-## Options
+- JS/TS module files are transformed and served as `text/javascript`;
+- `.css` files are processed (see [CSS](#css-is-processed-with-lightning-css-not-passed-through)) — a bare `.css` URL serves
+  processed `text/css`; `?module` serves a JS wrapper;
+- other non-module files (`package.json`, `README.md`, …) are served **raw**,
+  untransformed, with a content-type guessed from the extension
+  (`application/json`, `text/markdown`, …);
+- append `?raw` to get the raw bytes of *any* file as `application/octet-stream`;
+- an unresolvable path returns a `404` `Response` (never throws) — including a
+  path that names a directory, or a file the package does not ship;
+- a file that IS there but cannot be processed — most often because one of its
+  imports fails to resolve — returns a `500` whose body is the reason
+  (`ModuleResolveError: Cannot resolve {"pkg":"astro:data-layer-content"}: registry
+  404 …`). "Not found" and "found, but broken" are different answers, and a
+  browser reports the second only as `Failed to fetch dynamically imported
+  module`, so the body is the one place the cause is visible.
 
-| Option      | Default                  | Purpose |
-|-------------|--------------------------|---------|
-| `cache`     | — (required)             | Injected `FilesApi` for the module cache. |
-| `project`   | —                        | `FilesApi` of local project files to serve. |
-| `sources`   | `[npmRegistrySource()]`  | Acquisition sources (npm tarball by default). |
-| `transform` | `newDefaultTransform()`  | Per-file transform (ESM + CJS-interop). |
-| `css`       | `newDefaultCssTransform()` | Per-file CSS transform (Lightning CSS). |
-| `target`    | `"browser"`              | Selects `exports` conditions + cache key; `"node"` supported. |
-| `lock`      | —                        | A `Lockfile` (pins versions); `prime` also writes one back. |
-| `basePath`  | `"/"`                    | Mount prefix, e.g. `"/deps/v1/"`. |
-| `depsPath`  | `""`                     | Prefix under `basePath` isolating external package URLs, e.g. `"deps/"`. |
-| `depsFolder`| `"~deps"`                | Per-module-root folder holding dependency proxies (see below). A reserved path segment. |
-| `provided`  | —                        | Names bound to live host instances (see [the `~deps` proxy layer](#the-deps-proxy-layer)). |
-| `globals`   | —                        | Extends/overrides the injectable free-global allowlist. |
-| `resolveEndpoint` | —                  | Swaps the linker deciding how a bare specifier binds. |
-| `cors`      | —                        | `true` → permissive CORS on every response; a record → exactly those headers. |
-
-### `ModuleServer`
-
-```ts
-interface ModuleServer {
-  resolve(ref: ModuleRef, importer?: string): Promise<ResolvedModule>; // single ref → URL
-  prime(entry: ModuleRef): Promise<ResolvedModule>;                    // warm the whole graph
-  listResources(entry: ModuleRef): Promise<string[]>;                  // every URL the entry needs
-  listPackageFiles(ref: ModuleRef): Promise<string[]>;                 // a package's full file list
-  fetch(request: Request): Promise<Response>;                          // standard Web handler
-  readonly lock: Lockfile;                                             // resolution map
-}
-
-type ModuleRef =
-  | { pkg: string; version?: string; subpath?: string } // e.g. { pkg: "lodash-es", subpath: "merge" }
-  | { url: string };                                     // a local project script
-```
-
-## Targets: browser vs node
-
-`target` selects which `package.json` `exports` conditions win and how Node
-builtins are handled, and is part of the cache key (a browser build and a node
-build of the same package never collide):
+Mount it under any `basePath` (returned URLs carry the prefix; the cached bytes
+stay portable, because internal imports are rewritten as **relative** URLs):
 
 ```ts
-// Browser (default): node:* builtins → self-hosted @jspm/core polyfill URLs.
-newModuleServer({ cache, target: "browser" });
-
-// Node: node:* builtins stay external (real Node builtins).
-newModuleServer({ cache, target: "node" });
+const server = newModuleServer({ cache, basePath: "/deps/v1/" });
+const r = await server.resolve({ pkg: "zod" }); // → { url: "/deps/v1/zod@3.23.8/lib/index.mjs" }
 ```
 
-## Reproducible resolution (the lockfile)
+### CORS headers must cover redirects too
 
-The resolution map is a `Lockfile` (`{ [name]: version }`). `prime` writes it to
-the cache and returns it via `server.lock`. Supply it back as `lock` to pin
-versions reproducibly — a partial lockfile pins only the names it lists:
+A browser fetches a module script in CORS mode even for a plain `import`, and
+follows redirects in that same mode — so a cross-origin consumer needs the headers
+on the **whole chain**, not just the response carrying the code. `cors: true`
+merges a permissive set (`*`, GET/HEAD/OPTIONS) onto every response `fetch`
+returns, 302s and 404s included, and answers `OPTIONS` with 204. A record supplies
+exactly those headers instead; omitted, nothing is added.
 
 ```ts
-const first = newModuleServer({ cache });
-await first.prime({ pkg: "app" });
-const lock = first.lock; // e.g. { app: "1.0.0", react: "18.3.1", … }
-
-// Elsewhere / later: identical resolution, no re-solve.
-const pinned = newModuleServer({ cache, lock });
+const server = newModuleServer({ cache, cors: true });
 ```
 
-## Custom `Source` (npm / JSR / URL / your own registry)
+If you add your own routes *around* `server.fetch` — redirects, an index page —
+cover them with the exported `corsHeaders(cors)` and `withHeaders(response,
+headers)` rather than a hand-rolled copy. [`examples/http-server.ts`](./examples/http-server.ts)
+does exactly that for its unpkg-style 302s.
 
-A `Source` turns a reference into a package's files + manifest. The default is
-`npmRegistrySource()`; provide your own (or several — the first whose `matches`
-returns true wins):
+CORS is only half of it: the **importing page** must also allow this origin in its
+own `script-src` CSP directive, or the import is blocked before a request is ever
+made — a failure that looks like the server's fault but never reaches it.
 
-```ts
-import type { Source } from "@statewalker/webrun-modules";
-import { MemFilesApi } from "@statewalker/webrun-files-mem";
-
-const myRegistry: Source = {
-  matches: (ref) => "pkg" in ref,
-  async load(ref) {
-    // fetch + unpack however you like; return the package tree + manifest
-    const files = new MemFilesApi();
-    // … write files …
-    return { name: ref.pkg, version: "1.0.0", files, manifest: { name: ref.pkg, version: "1.0.0" } };
-  },
-};
-
-newModuleServer({ cache, sources: [myRegistry, npmRegistrySource()] });
-```
-
-`npmRegistrySource(options?)` accepts `{ registryUrl, fetch, createFiles }` — pass
-a custom `fetch` (e.g. to add auth or point at a private registry) or a private
-registry URL.
-
-## Custom `Transform`
-
-The default transform (`newDefaultTransform()`) dispatches per file: ESM/TS/JSX go
-through `newEsmTransform()`, CommonJS through `newCjsTransform()`. Swap in your own
-`Transform` — it receives one file and a `rewrite(specifier) => url | undefined`
-callback and returns browser-runnable ESM:
-
-```ts
-import { newDefaultTransform, detectFormat } from "@statewalker/webrun-modules";
-import type { Transform } from "@statewalker/webrun-modules";
-
-const myTransform: Transform = {
-  async transform(file, rewrite) {
-    // file = { path, source, format: "esm" | "cjs" | "ts" | "tsx" }
-    // call rewrite(spec) for each import specifier to get its local URL.
-    // `undefined` means the specifier cannot be placed: do not link it. A CJS
-    // transform leaves it out of its require map so `require` throws at the CALL
-    // site (see the optional-`require` note under Limitations); an ESM transform
-    // has no call site to throw at, so it keeps the original specifier and lets
-    // the link fail loudly.
-    return /* transformed ESM */ file.source;
-  },
-};
-
-newModuleServer({ cache, transform: myTransform });
-```
-
-`detectFormat(path, source, manifest?)` returns the `SourceFormat` the default
-transform would infer.
-
-## CSS
+### CSS is processed with Lightning CSS, not passed through
 
 `.css` files are processed, not just passed through — by default with
 [Lightning CSS](https://lightningcss.dev/) (nesting flattened, vendor-prefixed
@@ -381,60 +505,10 @@ proxy) and are joined by `listResources`/`prime`.
 
 **Out of scope:** Tailwind JIT (precompile Tailwind to plain CSS before
 serving), CSS-in-JS, Sass/PostCSS (bring your own via the `CssTransform` seam
-above), and CSS source maps (tracked for a later `map` field on
-`CssTransformResult`).
+above), and CSS source maps (`CssTransformResult` has a `map` field,
+but the default transform leaves it unset).
 
-## Serving surface
-
-`server.fetch(request)` is a plain `(Request) => Promise<Response>`:
-
-- JS/TS module files are transformed and served as `text/javascript`;
-- `.css` files are processed (see [CSS](#css) below) — a bare `.css` URL serves
-  processed `text/css`; `?module` serves a JS wrapper;
-- other non-module files (`package.json`, `README.md`, …) are served **raw**,
-  untransformed, with a content-type guessed from the extension
-  (`application/json`, `text/markdown`, …);
-- append `?raw` to get the raw bytes of *any* file as `application/octet-stream`;
-- an unresolvable path returns a `404` `Response` (never throws) — including a
-  path that names a directory, or a file the package does not ship;
-- a file that IS there but cannot be processed — most often because one of its
-  imports fails to resolve — returns a `500` whose body is the reason
-  (`ModuleResolveError: Cannot resolve {"pkg":"astro:data-layer-content"}: registry
-  404 …`). "Not found" and "found, but broken" are different answers, and a
-  browser reports the second only as `Failed to fetch dynamically imported
-  module`, so the body is the one place the cause is visible.
-
-Mount it under any `basePath` (returned URLs carry the prefix; the cached bytes
-stay portable, because internal imports are rewritten as **relative** URLs):
-
-```ts
-const server = newModuleServer({ cache, basePath: "/deps/v1/" });
-const r = await server.resolve({ pkg: "zod" }); // → { url: "/deps/v1/zod@3.23.8/lib/index.mjs" }
-```
-
-### CORS
-
-A browser fetches a module script in CORS mode even for a plain `import`, and
-follows redirects in that same mode — so a cross-origin consumer needs the headers
-on the **whole chain**, not just the response carrying the code. `cors: true`
-merges a permissive set (`*`, GET/HEAD/OPTIONS) onto every response `fetch`
-returns, 302s and 404s included, and answers `OPTIONS` with 204. A record supplies
-exactly those headers instead; omitted, nothing is added.
-
-```ts
-const server = newModuleServer({ cache, cors: true });
-```
-
-If you add your own routes *around* `server.fetch` — redirects, an index page —
-cover them with the exported `corsHeaders(cors)` and `withHeaders(response,
-headers)` rather than a hand-rolled copy. [`examples/http-server.ts`](./examples/http-server.ts)
-does exactly that for its unpkg-style 302s.
-
-CORS is only half of it: the **importing page** must also allow this origin in its
-own `script-src` CSP directive, or the import is blocked before a request is ever
-made — a failure that looks like the server's fault but never reaches it.
-
-## Errors
+### 404 means not found; 500 means found but broken
 
 - `ModuleResolveError { ref, reason }` — a package / version / subpath can't be
   resolved. From `fetch` this is a `404` when the REQUESTED path is what could not
@@ -444,85 +518,7 @@ made — a failure that looks like the server's fault but never reaches it.
 - `ModuleTransformError { path, reason }` — a file can't be transformed to runnable
   ESM (a `500` carrying the reason).
 
-## Utilities
-
-Also exported: `untarTgz(bytes)` (isomorphic npm-tarball unpacker),
-`parseSpecifier(spec)` (bare specifier → `{ pkg, subpath? }`, scope-aware),
-`relativeUrl(fromId, toId)`, and the two CORS helpers `corsHeaders(cors)` /
-`withHeaders(response, headers)` described under [CORS](#cors).
-
-## How it works
-
-- **Acquire** — the default `Source` fetches the npm registry tarball, untars it
-  in memory (pure-JS, isomorphic), and caches every file.
-- **Resolve** — versions resolve against the registry with whole-name dedupe (one
-  version per package where semver allows; incompatible ranges are kept side by
-  side). `package.json` `exports`/`imports` conditions are honored for the target;
-  Node builtins map to `@jspm/core` polyfills (browser) or stay external (node).
-  The resolution map is persisted as a lockfile.
-- **Transform** — each file becomes browser-runnable ESM one-to-one. ESM/TS/JSX is
-  transpiled and its specifiers rewritten in place; CommonJS is wrapped so the ESM
-  module graph itself provides `require` (synchronously, backed by the eagerly
-  primed graph). A CJS module's body runs inside a deferred `__cjsExec()` factory
-  rather than at module-evaluation time, which keeps CJS's lazy ordering: a
-  circular `require` re-enters that factory and receives the exports published so
-  far, exactly as Node does. That is what makes the common cycle idiom — assign
-  `module.exports`, *then* require your partner — work for packages that rely on
-  it, semver among them. A transformed CJS module therefore carries one extra
-  export, `__cjsExec`, visible in its namespace object. Internal imports are
-  rewritten as **relative** URLs, so cached bytes are portable across mount
-  prefixes.
-
-## Limitations
-
-- **Computed `require(expr)`** across package boundaries can't be pre-resolved and
-  throws at execution time — the boundary where an `esbuild-wasm` bundle fallback
-  would take over.
-- **An optional `require`** — `try { x = require("maybe") } catch {}` — works: a
-  bare specifier with nothing importable behind it is left out of the require map,
-  so the `require` throws at its call site the way Node's `MODULE_NOT_FOUND` does,
-  and the `catch` runs. A *static ESM* `import` of a missing module has no call
-  site to throw at and still fails loudly at link.
-- **A CJS package's named exports are only the ones `cjs-module-lexer` can see
-  statically.** Where a package assigns its exports in a way the lexer cannot
-  follow, the module surfaces as `default` alone and the API is reached through it
-  (`(await import(url)).default.transform`) — ordinary CJS interop, not a failure.
-  `esbuild-wasm` is one such package.
-- **A package that depends on a bundler's virtual modules can't be served.**
-  Specifiers like `astro:data-layer-content` or `virtual:…` are invented by a
-  bundler plugin at build time and exist in no registry, so they cannot be
-  resolved — and every specifier is resolved eagerly at transform time, dynamic
-  `import()` included, which is what makes `prime` able to cache a whole graph for
-  offline use. A file reaching for one therefore fails with a `500` naming it, even
-  where the source wraps it in `try { await import(…) } catch {}`. That is
-  deliberate: the alternative silently produces a graph that is only partly
-  resolvable.
-- **Node-only packages don't become browser-runnable.** Resolving and transforming
-  a package is not the same as it working: `esbuild`, for instance, reads
-  `process.versions.node` at load and drives a native binary over
-  `child_process`, so it loads and then fails. Prefer a package with a browser
-  build (`esbuild-wasm` over `esbuild`); `target: "browser"` picks the `browser`
-  condition when the package ships one.
-- Dedupe is greedy (first-resolved version wins per name), not a full constraint
-  hoist.
-- **Free Node globals under `target: "browser"`** (`process.env.NODE_ENV` and
-  friends) are solved via the `~deps` proxy layer below — no page-side `define`
-  needed.
-- **A require cycle that crosses the ESM/CJS boundary** is not supported: the CJS
-  side reads a binding of a partner that is still evaluating, and ESM has no
-  partially-initialized view to hand back the way CJS's `module.exports` does. It
-  fails with `Cannot access '…' before initialization`. Cycles *between* CJS
-  modules do work — see [How it works](#how-it-works).
-- Bundling/copying the resolved graph into a distributable tree, `.d.ts` type
-  serving, package lifecycle scripts, and HMR are out of scope.
-- **`import * as X` of a host-provided module** can't enumerate the instance's
-  keys as named bindings (an ESM proxy can't introspect an arbitrary runtime
-  object) — only `import X from "…"` (default = the instance itself, covering
-  property access) and explicitly-named imports are supported for `host`
-  bindings. Ordinary (non-provided) npm/local deps have no such limit —
-  `export *` re-exports the real module.
-
-## The `~deps` proxy layer
+### Every external reference goes through one `~deps` proxy per module root
 
 Every external/free-global reference a module makes is rewritten to import a
 small **proxy** from that module's own deps folder — `~deps/{specifier}/index.js`
@@ -533,7 +529,7 @@ of a module resolves `react` through the one file `~deps/react/index.js`,
 however deep in the tree it sits.
 
 The folder's name is the `depsFolder` option (on both `newModuleServer` and
-`newProjectBuild`, default `"~deps"`); it must be a single path segment. Whatever
+`newProjectBuild` from `@statewalker/webrun-modules-build`, default `"~deps"`); it must be a single path segment. Whatever
 you name it becomes a **reserved path segment for the whole project**: any id with
 `/{depsFolder}/` anywhere in it is treated as generated — the walk skips analyzing
 it once its emitted artifact is in the cache, and the server answers 404 for one
@@ -592,6 +588,78 @@ target is `local`, `host`, or `cdn`, with the proxy resolving the binding:
   `inline` (bundled source verbatim). Supply your own `EndpointResolver` to opt
   into `cdn`/`inline` — swapping it changes only the generated proxy bodies, the
   module's own imports never change.
+
+### What does not work, and how it fails
+
+- **Computed `require(expr)`** across package boundaries can't be pre-resolved and
+  throws at execution time — the boundary where an `esbuild-wasm` bundle fallback
+  would take over.
+- **An optional `require`** — `try { x = require("maybe") } catch {}` — works: a
+  bare specifier with nothing importable behind it is left out of the require map,
+  so the `require` throws at its call site the way Node's `MODULE_NOT_FOUND` does,
+  and the `catch` runs. A *static ESM* `import` of a missing module has no call
+  site to throw at and still fails loudly at link.
+- **A CJS package's named exports are only the ones `cjs-module-lexer` can see
+  statically.** Where a package assigns its exports in a way the lexer cannot
+  follow, the module surfaces as `default` alone and the API is reached through it
+  (`(await import(url)).default.transform`) — ordinary CJS interop, not a failure.
+  `esbuild-wasm` is one such package.
+- **A package that depends on a bundler's virtual modules can't be served.**
+  Specifiers like `astro:data-layer-content` or `virtual:…` are invented by a
+  bundler plugin at build time and exist in no registry, so they cannot be
+  resolved — and every specifier is resolved eagerly at transform time, dynamic
+  `import()` included, which is what makes `prime` able to cache a whole graph for
+  offline use. A file reaching for one therefore fails with a `500` naming it, even
+  where the source wraps it in `try { await import(…) } catch {}`. That is
+  deliberate: the alternative silently produces a graph that is only partly
+  resolvable.
+- **Node-only packages don't become browser-runnable.** Resolving and transforming
+  a package is not the same as it working: `esbuild`, for instance, reads
+  `process.versions.node` at load and drives a native binary over
+  `child_process`, so it loads and then fails. Prefer a package with a browser
+  build (`esbuild-wasm` over `esbuild`); `target: "browser"` picks the `browser`
+  condition when the package ships one.
+- Dedupe is greedy (first-resolved version wins per name), not a full constraint
+  hoist.
+- **Free Node globals under `target: "browser"`** (`process.env.NODE_ENV` and
+  friends) are solved via the `~deps` proxy layer below — no page-side `define`
+  needed.
+- **A require cycle that crosses the ESM/CJS boundary** is not supported: the CJS
+  side reads a binding of a partner that is still evaluating, and ESM has no
+  partially-initialized view to hand back the way CJS's `module.exports` does. It
+  fails with `Cannot access '…' before initialization`. Cycles *between* CJS
+  modules do work — see [Acquire, resolve, transform](#acquire-resolve-transform-one-file-in-one-esm-file-out).
+- Bundling/copying the resolved graph into a distributable tree, `.d.ts` type
+  serving, package lifecycle scripts, and HMR are out of scope.
+- **`import * as X` of a host-provided module** can't enumerate the instance's
+  keys as named bindings (an ESM proxy can't introspect an arbitrary runtime
+  object) — only `import X from "…"` (default = the instance itself, covering
+  property access) and explicitly-named imports are supported for `host`
+  bindings. Ordinary (non-provided) npm/local deps have no such limit —
+  `export *` re-exports the real module.
+
+### Utilities
+
+Also exported: `untarTgz(bytes)` (isomorphic npm-tarball unpacker),
+`parseSpecifier(spec)` (bare specifier → `{ pkg, subpath? }`, scope-aware),
+`relativeUrl(fromId, toId)`, and the two CORS helpers `corsHeaders(cors)` /
+`withHeaders(response, headers)` described under [CORS](#cors-headers-must-cover-redirects-too).
+
+### Dependencies, and what each one is for
+
+- `@statewalker/webrun-files`, `@statewalker/webrun-files-mem` — the `FilesApi`
+  interface and the in-memory tree that unpacked tarballs are held in.
+- `fflate` — gunzip for npm tarballs (`untarTgz`); pure JS, so it runs everywhere.
+- `semver` — resolves version ranges against registry metadata.
+- `resolve.exports` — applies `package.json` `exports`/`imports` conditions for the target.
+- `sucrase` — strips TS and compiles JSX (`toJs`). It keeps line numbers.
+- `acorn`, `acorn-globals`, `cjs-module-lexer` — parse modules, find free
+  globals, and find CommonJS named exports.
+- `lightningcss-wasm` — the default CSS transform (WASM, so it also runs in a browser).
+
+`npm-package-arg` and `@jspm/core` are declared as dependencies but not imported
+by the code: `@jspm/core` is fetched from the registry like any other package
+when a browser build needs a Node built-in polyfill.
 
 ## License
 
