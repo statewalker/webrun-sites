@@ -12,7 +12,11 @@ import type {
   RunResult,
 } from "./types.js";
 
-/** One seq bump per transaction: every pending row it writes gets the new value. */
+/**
+ * Advance the queue seq. Each enqueue group bumps first, so its queue rows carry
+ * a value newer than any seq claimed so far. A transaction may bump several
+ * times: a commit only needs the seq to be newer than the one it claimed.
+ */
 const BUMP: SqlStatement = { sql: "UPDATE cells_meta SET value = value + 1 WHERE name = 'seq'" };
 
 export class ConflictingEmission extends Error {

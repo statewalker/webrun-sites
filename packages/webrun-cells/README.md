@@ -164,6 +164,10 @@ replaced `seq` is claimed as it now stands.
   of its producers converges to the new value. Two engines sharing one database can race past this check
   when they emit the same key at the same moment. The check reads before the commit, because the driver cannot
   read inside a transaction.
+- **Emissions belong to the input the cell last pulled.** A cell must not pull ahead: buffering several inputs
+  and then emitting attributes every output to the last input. Removing an earlier input then leaves its outputs
+  behind, and removing the last one deletes outputs that other inputs still produce. Emit for each input before
+  pulling the next.
 - **`leaseMs` must exceed the time a batch takes.** A batch that runs longer than its lease can be claimed and
   run a second time by another engine on the same database.
 - **A cell that never pulls its inputs does not spin.** `run()` stops claiming a cell whose batch pulled
