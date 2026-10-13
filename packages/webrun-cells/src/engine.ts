@@ -2,7 +2,15 @@ import { DataflowGraph } from "@statewalker/webrun-dataflow";
 import type { SqlDriver, SqlStatement } from "@statewalker/webrun-files-sqlite";
 import { canonicalJson } from "./canonical-json.js";
 import { SCHEMA } from "./schema.js";
-import type { Cell, CellEngineOptions, CellInput, Emission, Json, RunResult } from "./types.js";
+import type {
+  Cell,
+  CellEngineOptions,
+  CellInput,
+  DeadLetter,
+  Emission,
+  Json,
+  RunResult,
+} from "./types.js";
 
 /** One seq bump per transaction: every pending row it writes gets the new value. */
 const BUMP: SqlStatement = { sql: "UPDATE cells_meta SET value = value + 1 WHERE name = 'seq'" };
@@ -87,6 +95,27 @@ export class CellEngine {
       signal,
     );
     return rows.map(({ key, value }) => ({ key, value: JSON.parse(value) as Json }));
+  }
+
+  async deadLetters(): Promise<DeadLetter[]> {
+    await this.#init();
+    return this.#db.all<DeadLetter>(
+      "SELECT cell, signal, key, attempts, error FROM cells_dead_letter ORDER BY cell, signal, key",
+    );
+  }
+
+  /** Put a dead-lettered input back in the queue with a fresh attempt count. */
+  async requeue(cell: string, signal: string, key: string): Promise<void> {
+    if (!this.#cells.has(cell)) throw new Error(`Unknown cell "${cell}"`);
+    await this.#init();
+    await this.#db.transaction([
+      {
+        sql: "DELETE FROM cells_dead_letter WHERE cell = ? AND signal = ? AND key = ?",
+        params: [cell, signal, key],
+      },
+      BUMP,
+      this.#pendingInsert(cell, signal, key),
+    ]);
   }
 
   /**
