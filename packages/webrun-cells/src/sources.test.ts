@@ -1,3 +1,4 @@
+import type { SqlDriver } from "@statewalker/webrun-files-sqlite";
 import { describe, expect, it } from "vitest";
 import { CellEngine } from "./engine.js";
 import { mapCell, memDb } from "./test-helpers.js";
@@ -40,5 +41,22 @@ describe("source rows", () => {
       await expect(engine.put("docs", "k", bad as never)).rejects.toThrow(TypeError);
     }
     expect(await engine.list("docs")).toEqual([]);
+  });
+
+  it("retries schema init after a transient failure", async () => {
+    const real = memDb();
+    let failures = 1;
+    const flaky: SqlDriver = {
+      all: (sql, ...params) => real.all(sql, ...params),
+      run: (sql, ...params) => real.run(sql, ...params),
+      transaction: async (statements) => {
+        if (failures-- > 0) throw new Error("SQLITE_BUSY");
+        return real.transaction(statements);
+      },
+    };
+    const engine = new CellEngine({ db: flaky, cells: [] });
+    await expect(engine.put("docs", "a", 1)).rejects.toThrow(/SQLITE_BUSY/);
+    await engine.put("docs", "a", 1);
+    expect(await engine.get("docs", "a")).toBe(1);
   });
 });

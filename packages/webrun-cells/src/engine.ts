@@ -84,7 +84,15 @@ export class CellEngine {
   }
 
   #init(): Promise<void> {
-    this.#ready ??= Promise.resolve(this.#db.transaction(SCHEMA)).then(() => undefined);
+    this.#ready ??= Promise.resolve()
+      .then(() => this.#db.transaction(SCHEMA))
+      .then(
+        () => undefined,
+        (error) => {
+          this.#ready = undefined;
+          throw error;
+        },
+      );
     return this.#ready;
   }
 
