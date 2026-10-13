@@ -216,8 +216,9 @@ export class CellEngine {
       return undefined;
     };
 
-    const gen = cell.run({ [Symbol.asyncIterator]: () => iterator })[Symbol.asyncIterator]();
+    let gen: AsyncIterator<Emission> | undefined;
     try {
+      gen = cell.run({ [Symbol.asyncIterator]: () => iterator })[Symbol.asyncIterator]();
       for (;;) {
         const step = await gen.next();
         if (step.done || fatal) break;
@@ -227,7 +228,7 @@ export class CellEngine {
     } catch (error) {
       failure = error;
     }
-    if (failure !== undefined || fatal) await gen.return?.(undefined);
+    if (failure !== undefined || fatal) await gen?.return?.(undefined);
     if (fatal) throw fatal;
 
     if (failure !== undefined) {

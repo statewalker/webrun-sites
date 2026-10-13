@@ -105,4 +105,19 @@ describe("cascade", () => {
     expect(values).toEqual(["v1", "v2"]);
     expect(await engine.get("out", "a")).toBe("v2");
   });
+
+  it("retries and dead-letters a cell whose run throws synchronously", async () => {
+    const boom = {
+      id: "boom",
+      inputs: ["docs"],
+      outputs: ["out"],
+      run() {
+        throw new Error("sync boom");
+      },
+    } as unknown as Cell;
+    const engine = new CellEngine({ db: memDb(), cells: [boom], maxAttempts: 2 });
+    await engine.put("docs", "a", "x");
+    expect(await engine.run()).toEqual({ committed: 0, failed: 2, deadLettered: 1 });
+    expect(await engine.run()).toEqual({ committed: 0, failed: 0, deadLettered: 0 });
+  });
 });
