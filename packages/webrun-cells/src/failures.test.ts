@@ -85,6 +85,53 @@ describe("failures", () => {
     expect((await engine.deadLetters())[0]?.error).toMatch(/undeclared signal "other"/);
   });
 
+  it("records the input's failure when the cell's cleanup throws too", async () => {
+    const c: Cell = {
+      id: "c",
+      inputs: ["docs"],
+      outputs: ["out"],
+      async *run(inputs) {
+        try {
+          for await (const i of inputs) yield { signal: "nope", key: i.key, value: 1 };
+        } finally {
+          // biome-ignore lint/correctness/noUnsafeFinally: a cell whose cleanup throws
+          throw new Error("cleanup failed");
+        }
+      },
+    };
+    const engine = new CellEngine({ db: memDb(), cells: [c], maxAttempts: 1 });
+    await engine.put("docs", "a", 1);
+    expect(await engine.run()).toEqual({ committed: 0, failed: 1, deadLettered: 1 });
+    expect((await engine.deadLetters())[0]?.error).toMatch(/undeclared signal "nope"/);
+  });
+
+  it("treats a cell throwing undefined as a failure, not a success", async () => {
+    let fail = false;
+    const c: Cell = {
+      id: "c",
+      inputs: ["docs"],
+      outputs: ["out"],
+      async *run(inputs) {
+        for await (const i of inputs) {
+          yield { signal: "out", key: "x", value: i.value };
+          if (fail) throw undefined;
+          yield { signal: "out", key: "y", value: i.value };
+        }
+      },
+    };
+    const engine = new CellEngine({ db: memDb(), cells: [c], maxAttempts: 1 });
+    await engine.put("docs", "a", 1);
+    await engine.run();
+    fail = true;
+    await engine.put("docs", "a", 2);
+    expect(await engine.run()).toEqual({ committed: 0, failed: 1, deadLettered: 1 });
+    expect(await engine.list("out")).toEqual([
+      { key: "x", value: 1 },
+      { key: "y", value: 1 },
+    ]);
+    expect((await engine.deadLetters())[0]?.error).toBe("undefined");
+  });
+
   it("fails an input whose emission conflicts with another input's", async () => {
     const c = mapCell("c", ["docs"], ["out"], (i) => [
       { signal: "out", key: "same", value: i.value },

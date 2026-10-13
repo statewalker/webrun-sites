@@ -187,6 +187,7 @@ export class CellEngine {
     let committedUpTo = -1; // inputs live[0..committedUpTo] are committed
     let emitted = new Map<string, Row>();
     let fatal: unknown; // a database error during a commit
+    let failed = false; // the current input failed (a cell may throw undefined)
     let failure: unknown; // the current input's failure
 
     const commitCurrent = async (): Promise<boolean> => {
@@ -258,15 +259,23 @@ export class CellEngine {
         const step = await gen.next();
         if (step.done || fatal) break;
         failure = await accept(step.value);
-        if (failure) break;
+        failed = failure !== undefined;
+        if (failed) break;
       }
     } catch (error) {
+      failed = true;
       failure = error;
     }
-    if (failure !== undefined || fatal) await gen?.return?.(undefined);
+    if (failed || fatal) {
+      try {
+        await gen?.return?.(undefined);
+      } catch {
+        // The cell's cleanup failed too; the input's own failure is what gets recorded.
+      }
+    }
     if (fatal) throw fatal;
 
-    if (failure !== undefined) {
+    if (failed) {
       const at = Math.max(current, 0);
       await this.#fail(cell, (live[at] as Live).claim, failure, result);
       await this.#release(
