@@ -22,7 +22,9 @@ const split = () =>
 async function session<T>(file: string, fn: (engine: CellEngine) => Promise<T>): Promise<T> {
   const sqlite = new DatabaseSync(file);
   try {
-    return await fn(new CellEngine({ db: new NodeSqlDriver(sqlite), cells: [split()], maxAttempts: 1 }));
+    return await fn(
+      new CellEngine({ db: new NodeSqlDriver(sqlite), cells: [split()], maxAttempts: 1 }),
+    );
   } finally {
     sqlite.close();
   }

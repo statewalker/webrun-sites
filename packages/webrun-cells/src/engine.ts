@@ -25,7 +25,8 @@ type Row = { signal: string; key: string; json: string };
 
 const rowId = (signal: string, key: string) => JSON.stringify([signal, key]);
 
-const errorText = (error: unknown) => (error instanceof Error ? `${error.name}: ${error.message}` : String(error));
+const errorText = (error: unknown) =>
+  error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 
 export class CellEngine {
   readonly #db: SqlDriver;
@@ -173,7 +174,10 @@ export class CellEngine {
         await this.#commit(cell, claim, new Map());
         result.committed++;
       } else {
-        live.push({ claim, input: { signal: claim.signal, key: claim.key, value: JSON.parse(value) as Json } });
+        live.push({
+          claim,
+          input: { signal: claim.signal, key: claim.key, value: JSON.parse(value) as Json },
+        });
       }
     }
     const retracted = live.length < batch.length;
@@ -263,11 +267,17 @@ export class CellEngine {
     if (failure !== undefined) {
       const at = Math.max(current, 0);
       await this.#fail(cell, (live[at] as Live).claim, failure, result);
-      await this.#release(cell, live.slice(at + 1).map((l) => l.claim));
+      await this.#release(
+        cell,
+        live.slice(at + 1).map((l) => l.claim),
+      );
       return true;
     }
     if (current >= 0 && !(await commitCurrent())) throw fatal;
-    await this.#release(cell, live.slice(current + 1).map((l) => l.claim));
+    await this.#release(
+      cell,
+      live.slice(current + 1).map((l) => l.claim),
+    );
     return retracted || current >= 0;
   }
 
@@ -283,7 +293,10 @@ export class CellEngine {
       ...input,
     );
     const statements: SqlStatement[] = [
-      { sql: "DELETE FROM cells_provenance WHERE cell = ? AND in_signal = ? AND in_key = ?", params: input },
+      {
+        sql: "DELETE FROM cells_provenance WHERE cell = ? AND in_signal = ? AND in_key = ?",
+        params: input,
+      },
     ];
     for (const row of emitted.values()) {
       statements.push({
@@ -311,9 +324,18 @@ export class CellEngine {
       );
     }
     statements.push(
-      { sql: "DELETE FROM cells_pending WHERE cell = ? AND signal = ? AND key = ? AND seq = ?", params: [...input, claim.seq] },
-      { sql: "UPDATE cells_pending SET lease_owner = NULL, lease_until = NULL WHERE cell = ? AND signal = ? AND key = ?", params: input },
-      { sql: "DELETE FROM cells_dead_letter WHERE cell = ? AND signal = ? AND key = ?", params: input },
+      {
+        sql: "DELETE FROM cells_pending WHERE cell = ? AND signal = ? AND key = ? AND seq = ?",
+        params: [...input, claim.seq],
+      },
+      {
+        sql: "UPDATE cells_pending SET lease_owner = NULL, lease_until = NULL WHERE cell = ? AND signal = ? AND key = ?",
+        params: input,
+      },
+      {
+        sql: "DELETE FROM cells_dead_letter WHERE cell = ? AND signal = ? AND key = ?",
+        params: input,
+      },
     );
     await this.#db.transaction(statements);
   }
@@ -343,7 +365,10 @@ export class CellEngine {
         sql: "INSERT INTO cells_dead_letter (cell, signal, key, attempts, error) VALUES (?, ?, ?, ?, ?) ON CONFLICT (cell, signal, key) DO UPDATE SET attempts = excluded.attempts, error = excluded.error",
         params: [...input, attempts, errorText(error)],
       },
-      { sql: "DELETE FROM cells_pending WHERE cell = ? AND signal = ? AND key = ? AND seq = ?", params: [...input, claim.seq] },
+      {
+        sql: "DELETE FROM cells_pending WHERE cell = ? AND signal = ? AND key = ? AND seq = ?",
+        params: [...input, claim.seq],
+      },
       unlease,
     ]);
   }
@@ -399,7 +424,9 @@ export class CellEngine {
    * `onlyIfAbsent`: enqueue only if the row no longer exists at commit time.
    */
   #pendingInsert(cell: string, signal: string, key: string, onlyIfAbsent = false): SqlStatement {
-    const guard = onlyIfAbsent ? " AND NOT EXISTS (SELECT 1 FROM cells_rows WHERE signal = ? AND key = ?)" : "";
+    const guard = onlyIfAbsent
+      ? " AND NOT EXISTS (SELECT 1 FROM cells_rows WHERE signal = ? AND key = ?)"
+      : "";
     return {
       sql: `INSERT INTO cells_pending (cell, signal, key, seq) SELECT ?, ?, ?, value FROM cells_meta WHERE name = 'seq'${guard} ON CONFLICT (cell, signal, key) DO UPDATE SET seq = excluded.seq, attempts = 0`,
       params: onlyIfAbsent ? [cell, signal, key, signal, key] : [cell, signal, key],

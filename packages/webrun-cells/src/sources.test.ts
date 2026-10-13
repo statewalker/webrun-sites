@@ -37,7 +37,13 @@ describe("source rows", () => {
 
   it("rejects values JSON cannot represent exactly", async () => {
     const engine = new CellEngine({ db: memDb(), cells: [] });
-    for (const bad of [undefined, Number.NaN, Number.POSITIVE_INFINITY, new Date(0), { a: undefined }]) {
+    for (const bad of [
+      undefined,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      new Date(0),
+      { a: undefined },
+    ]) {
       await expect(engine.put("docs", "k", bad as never)).rejects.toThrow(TypeError);
     }
     expect(await engine.list("docs")).toEqual([]);

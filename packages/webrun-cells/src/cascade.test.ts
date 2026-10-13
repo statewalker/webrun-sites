@@ -55,7 +55,9 @@ describe("cascade", () => {
   });
 
   it("treats null as a value, not a deletion", async () => {
-    const c = mapCell("c", ["docs"], ["out"], (i) => [{ signal: "out", key: i.key, value: i.value }]);
+    const c = mapCell("c", ["docs"], ["out"], (i) => [
+      { signal: "out", key: i.key, value: i.value },
+    ]);
     const engine = new CellEngine({ db: memDb(), cells: [c] });
     await engine.put("docs", "a", null);
     await engine.run();

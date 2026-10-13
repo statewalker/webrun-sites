@@ -5,7 +5,8 @@ import { CellEngine } from "./engine.js";
 import { mapCell, memDb } from "./test-helpers.js";
 import type { Cell } from "./types.js";
 
-const copyCell = () => mapCell("copy", ["docs"], ["out"], (i) => [{ signal: "out", key: i.key, value: i.value }]);
+const copyCell = () =>
+  mapCell("copy", ["docs"], ["out"], (i) => [{ signal: "out", key: i.key, value: i.value }]);
 
 describe("leases", () => {
   it("reclaims work from an engine that never commits, only after leaseMs", async () => {
@@ -29,7 +30,12 @@ describe("leases", () => {
     };
     const opts = { leaseMs: 100, now: () => now };
     const a = new CellEngine({ db: new NodeSqlDriver(sqlite), cells: [hang], owner: "A", ...opts });
-    const b = new CellEngine({ db: new NodeSqlDriver(sqlite), cells: [copyCell()], owner: "B", ...opts });
+    const b = new CellEngine({
+      db: new NodeSqlDriver(sqlite),
+      cells: [copyCell()],
+      owner: "B",
+      ...opts,
+    });
     await a.put("docs", "k", "v");
     void a.run();
     await started;

@@ -20,13 +20,17 @@ export const SCHEMA: SqlStatement[] = [
       out_signal TEXT NOT NULL, out_key TEXT NOT NULL,
       PRIMARY KEY (cell, in_signal, in_key, out_signal, out_key)) WITHOUT ROWID`,
   },
-  { sql: "CREATE INDEX IF NOT EXISTS cells_provenance_out ON cells_provenance (out_signal, out_key)" },
+  {
+    sql: "CREATE INDEX IF NOT EXISTS cells_provenance_out ON cells_provenance (out_signal, out_key)",
+  },
   {
     sql: `CREATE TABLE IF NOT EXISTS cells_dead_letter (
       cell TEXT NOT NULL, signal TEXT NOT NULL, key TEXT NOT NULL,
       attempts INTEGER NOT NULL, error TEXT NOT NULL,
       PRIMARY KEY (cell, signal, key)) WITHOUT ROWID`,
   },
-  { sql: "CREATE TABLE IF NOT EXISTS cells_meta (name TEXT PRIMARY KEY, value INTEGER NOT NULL) WITHOUT ROWID" },
+  {
+    sql: "CREATE TABLE IF NOT EXISTS cells_meta (name TEXT PRIMARY KEY, value INTEGER NOT NULL) WITHOUT ROWID",
+  },
   { sql: "INSERT OR IGNORE INTO cells_meta (name, value) VALUES ('seq', 0)" },
 ];

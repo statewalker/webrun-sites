@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import { CellEngine } from "./engine.js";
 import { mapCell, memDb } from "./test-helpers.js";
 
-const cell = (id: string, inputs: string[], outputs: string[]) => mapCell(id, inputs, outputs, () => []);
+const cell = (id: string, inputs: string[], outputs: string[]) =>
+  mapCell(id, inputs, outputs, () => []);
 
 describe("graph validation", () => {
   it("rejects a cycle between cells", () => {
     expect(
-      () => new CellEngine({ db: memDb(), cells: [cell("a", ["x"], ["y"]), cell("b", ["y"], ["x"])] }),
+      () =>
+        new CellEngine({ db: memDb(), cells: [cell("a", ["x"], ["y"]), cell("b", ["y"], ["x"])] }),
     ).toThrow(/Cycle detected/);
   });
 
@@ -19,7 +21,8 @@ describe("graph validation", () => {
 
   it("rejects duplicate cell ids", () => {
     expect(
-      () => new CellEngine({ db: memDb(), cells: [cell("a", ["x"], ["y"]), cell("a", ["x"], ["z"])] }),
+      () =>
+        new CellEngine({ db: memDb(), cells: [cell("a", ["x"], ["y"]), cell("a", ["x"], ["z"])] }),
     ).toThrow(/Duplicate cell id/);
   });
 });

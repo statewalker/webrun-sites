@@ -18,6 +18,7 @@ export type ConsumerTarget = {
 export const PACKAGES: ConsumerTarget[] = [
   { name: "@statewalker/webrun-dataflow", dir: "webrun-dataflow", subpaths: ["."] },
   { name: "@statewalker/webrun-builder", dir: "webrun-builder", subpaths: ["."] },
+  { name: "@statewalker/webrun-cells", dir: "webrun-cells", subpaths: ["."] },
   { name: "@statewalker/webrun-modules", dir: "webrun-modules", subpaths: ["."] },
   { name: "@statewalker/webrun-modules-build", dir: "webrun-modules-build", subpaths: ["."] },
   { name: "@statewalker/webrun-tailwind", dir: "webrun-tailwind", subpaths: ["."] },
