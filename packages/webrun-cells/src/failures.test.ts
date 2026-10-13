@@ -99,6 +99,23 @@ describe("failures", () => {
     expect(dead?.error).toMatch(/^ConflictingEmission: /);
   });
 
+  it("converges a shared output when every producer changes it together", async () => {
+    let shared = 1;
+    const c = mapCell("c", ["docs"], ["out"], () => [
+      { signal: "out", key: "shared", value: shared },
+    ]);
+    const engine = new CellEngine({ db: memDb(), cells: [c] });
+    await engine.put("docs", "a", 1);
+    await engine.put("docs", "b", 1);
+    await engine.run();
+    shared = 2;
+    await engine.put("docs", "a", 2);
+    await engine.put("docs", "b", 2);
+    expect(await engine.run()).toEqual({ committed: 2, failed: 0, deadLettered: 0 });
+    expect(await engine.get("out", "shared")).toBe(2);
+    expect(await engine.deadLetters()).toEqual([]);
+  });
+
   it("fails the first input when a cell yields before pulling one", async () => {
     const eager: Cell = {
       id: "eager",

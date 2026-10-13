@@ -231,8 +231,10 @@ export class CellEngine {
       }
       const stored = await this.#value(e.signal, e.key);
       if (stored !== undefined && stored !== json) {
+        // Only a settled producer conflicts: one whose own input is still
+        // queued is stale and will run again.
         const [other] = await this.#db.all<{ cell: string; in_signal: string; in_key: string }>(
-          "SELECT cell, in_signal, in_key FROM cells_provenance WHERE out_signal = ? AND out_key = ? AND NOT (cell = ? AND in_signal = ? AND in_key = ?) LIMIT 1",
+          "SELECT cell, in_signal, in_key FROM cells_provenance pr WHERE out_signal = ? AND out_key = ? AND NOT (cell = ? AND in_signal = ? AND in_key = ?) AND NOT EXISTS (SELECT 1 FROM cells_pending p WHERE p.cell = pr.cell AND p.signal = pr.in_signal AND p.key = pr.in_key) LIMIT 1",
           e.signal,
           e.key,
           cell.id,

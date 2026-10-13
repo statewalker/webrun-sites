@@ -147,8 +147,10 @@ terminates.
   after a restart.
 - **A dead-lettered input does not stop convergence.** `run()` resolves normally. Its result's `deadLettered`
   count and `deadLetters()` are the only signals. The failing input's previous outputs stay as they were.
-- **Two inputs may emit the same output only with the same value.** A differing value fails the later input
-  with `ConflictingEmission: <signal>/<key>: …`. Two engines sharing one database can race past this check
+- **Two inputs may emit the same output only with the same value.** A value that differs from the one a
+  *settled* producer emitted fails the input with `ConflictingEmission: <signal>/<key>: …`. A producer whose own
+  input is still queued does not count: it is stale and runs again, so changing a shared value through all
+  of its producers converges to the new value. Two engines sharing one database can race past this check
   when they emit the same key at the same moment. The check reads before the commit, because the driver cannot
   read inside a transaction.
 - **`leaseMs` must exceed the time a batch takes.** A batch that runs longer than its lease can be claimed and
