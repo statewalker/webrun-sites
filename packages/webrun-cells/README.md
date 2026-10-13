@@ -131,8 +131,19 @@ consumers are queued only if the row is really gone.
 
 Cells declare `inputs` and `outputs`. Construction fails on duplicate ids, on cycles (`Cycle detected among
 cells: …`), and on a cell that consumes its own output. `put`/`remove` on a signal some cell outputs fail with
-`"…" is not a source signal`. Because the graph is acyclic and every commit removes a queue row, `run()`
-terminates.
+`"…" is not a source signal`.
+
+`run()` terminates, though a commit does not always remove a queue row (a change that lands while the cell runs
+keeps the row queued under a newer `seq`). Four properties bound the work instead:
+
+- The graph is acyclic, so a change cascades through finitely many cells.
+- A failing input is retried at most `maxAttempts` times, then moved to the dead letter.
+- An input's attempt count resets only when its row actually changes. Re-emitting an equal value queues nothing.
+- A cell whose batch pulled nothing is not claimed again in the same `run()`.
+
+A claim that loses every selected row to a race (another engine leased it, or a newer change replaced its `seq`)
+counts as progress and is retried. It cannot loop: a row leased by someone else drops out of the next claim, and a
+replaced `seq` is claimed as it now stands.
 
 ### Dependencies
 

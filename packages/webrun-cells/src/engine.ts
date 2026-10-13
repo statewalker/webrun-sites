@@ -135,8 +135,15 @@ export class CellEngine {
       for (const id of this.#order) {
         if (stalled.has(id)) continue;
         const batch = await this.#claim(id);
-        if (batch.length === 0) continue;
-        if (!(await this.#runBatch(this.#cells.get(id) as Cell, batch, result))) stalled.add(id);
+        if (batch === undefined) continue;
+        // An empty batch still counts as progress: the selected rows changed or
+        // were leased by someone else, and drop out of the next SELECT.
+        if (
+          batch.length > 0 &&
+          !(await this.#runBatch(this.#cells.get(id) as Cell, batch, result))
+        ) {
+          stalled.add(id);
+        }
         progressed = true;
         break;
       }
@@ -144,7 +151,8 @@ export class CellEngine {
     return result;
   }
 
-  async #claim(cell: string): Promise<Claimed[]> {
+  /** `undefined` when nothing is claimable; empty when every selected row was lost to a race. */
+  async #claim(cell: string): Promise<Claimed[] | undefined> {
     const now = this.#now();
     const rows = await this.#db.all<Claimed>(
       "SELECT signal, key, seq, attempts FROM cells_pending WHERE cell = ? AND (lease_until IS NULL OR lease_until <= ?) ORDER BY seq, signal, key LIMIT ?",
@@ -152,7 +160,7 @@ export class CellEngine {
       now,
       this.#batchSize,
     );
-    if (rows.length === 0) return [];
+    if (rows.length === 0) return undefined;
     // The lease condition is repeated so a concurrent claimer that selected the
     // same rows gets a zero count and drops them.
     const counts = await this.#db.transaction(
@@ -167,11 +175,15 @@ export class CellEngine {
   /** Returns false when the batch made no progress at all (cell pulled nothing). */
   async #runBatch(cell: Cell, batch: Claimed[], result: RunResult): Promise<boolean> {
     const live: Live[] = [];
-    for (const claim of batch) {
+    for (const [i, claim] of batch.entries()) {
       const value = await this.#value(claim.signal, claim.key);
       if (value === undefined) {
         // The input row is gone: retract what it produced, without the cell.
-        await this.#commit(cell, claim, new Map());
+        try {
+          await this.#commit(cell, claim, new Map());
+        } catch (error) {
+          return this.#abort(cell, [...live.map((l) => l.claim), ...batch.slice(i)], error);
+        }
         result.committed++;
       } else {
         live.push({
@@ -273,7 +285,8 @@ export class CellEngine {
         // The cell's cleanup failed too; the input's own failure is what gets recorded.
       }
     }
-    if (fatal) throw fatal;
+    const uncommitted = () => live.slice(committedUpTo + 1).map((l) => l.claim);
+    if (fatal) return this.#abort(cell, uncommitted(), fatal);
 
     if (failed) {
       const at = Math.max(current, 0);
@@ -284,7 +297,7 @@ export class CellEngine {
       );
       return true;
     }
-    if (current >= 0 && !(await commitCurrent())) throw fatal;
+    if (current >= 0 && !(await commitCurrent())) return this.#abort(cell, uncommitted(), fatal);
     await this.#release(
       cell,
       live.slice(current + 1).map((l) => l.claim),
@@ -382,6 +395,16 @@ export class CellEngine {
       },
       unlease,
     ]);
+  }
+
+  /** A database error ends the run: release the claims it left uncommitted, best effort, and rethrow. */
+  async #abort(cell: Cell, claims: Claimed[], error: unknown): Promise<never> {
+    try {
+      await this.#release(cell, claims);
+    } catch {
+      // The release failing too must not mask the original error.
+    }
+    throw error;
   }
 
   async #release(cell: Cell, claims: Claimed[]): Promise<void> {

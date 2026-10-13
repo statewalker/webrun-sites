@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { NodeSqlDriver } from "@statewalker/webrun-files-sqlite";
+import { NodeSqlDriver, type SqlDriver } from "@statewalker/webrun-files-sqlite";
 import { describe, expect, it } from "vitest";
 import { CellEngine } from "./engine.js";
 import { mapCell, memDb } from "./test-helpers.js";
@@ -54,5 +54,55 @@ describe("leases", () => {
     const [r1, r2] = await Promise.all([engine.run(), engine.run()]);
     expect(r1.committed + r2.committed).toBe(3);
     expect(c.seen.sort()).toEqual(["docs/a", "docs/b", "docs/c"]);
+  });
+
+  it("claims again in the same run when every selected row was taken", async () => {
+    const real = memDb();
+    let raced = false;
+    const db: SqlDriver = {
+      all: async <T>(sql: string, ...params: unknown[]) => {
+        const rows = await real.all<T>(sql, ...params);
+        if (!raced && sql.includes("FROM cells_pending WHERE cell") && rows.length > 0) {
+          raced = true; // a change lands between the claim's SELECT and UPDATE
+          await real.run("UPDATE cells_pending SET seq = seq + 100");
+        }
+        return rows;
+      },
+      run: (sql, ...params) => real.run(sql, ...params),
+      transaction: (statements) => real.transaction(statements),
+    };
+    const engine = new CellEngine({ db, cells: [copyCell()] });
+    await engine.put("docs", "a", 1);
+    expect(await engine.run()).toEqual({ committed: 1, failed: 0, deadLettered: 0 });
+    expect(await engine.get("out", "a")).toBe(1);
+  });
+
+  it("releases its own leases when a commit fails, so the next run() does the work", async () => {
+    const real = memDb();
+    let failNext = false;
+    const db: SqlDriver = {
+      all: (sql, ...params) => real.all(sql, ...params),
+      run: (sql, ...params) => real.run(sql, ...params),
+      transaction: async (statements) => {
+        if (failNext && statements[0]?.sql.startsWith("DELETE FROM cells_provenance")) {
+          failNext = false;
+          throw new Error("SQLITE_BUSY");
+        }
+        return real.transaction(statements);
+      },
+    };
+    const engine = new CellEngine({ db, cells: [copyCell()] });
+    await engine.put("docs", "a", 1);
+    failNext = true;
+    await expect(engine.run()).rejects.toThrow(/SQLITE_BUSY/);
+    expect(await engine.run()).toEqual({ committed: 1, failed: 0, deadLettered: 0 });
+    expect(await engine.get("out", "a")).toBe(1);
+
+    // The same for a removal, which commits without running the cell.
+    await engine.remove("docs", "a");
+    failNext = true;
+    await expect(engine.run()).rejects.toThrow(/SQLITE_BUSY/);
+    expect(await engine.run()).toEqual({ committed: 1, failed: 0, deadLettered: 0 });
+    expect(await engine.list("out")).toEqual([]);
   });
 });
