@@ -49,6 +49,14 @@ describe("source rows", () => {
     expect(await engine.list("docs")).toEqual([]);
   });
 
+  it('keeps a "__proto__" key as data', async () => {
+    const engine = new CellEngine({ db: memDb(), cells: [] });
+    await engine.put("docs", "a", JSON.parse('{"__proto__": {"x": 1}, "y": 2}'));
+    const value = (await engine.get("docs", "a")) as Record<string, unknown>;
+    expect(Object.getOwnPropertyDescriptor(value, "__proto__")?.value).toEqual({ x: 1 });
+    expect(value.y).toBe(2);
+  });
+
   it("retries schema init after a transient failure", async () => {
     const real = memDb();
     let failures = 1;

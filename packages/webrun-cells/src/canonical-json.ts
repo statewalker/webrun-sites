@@ -20,7 +20,8 @@ function normalize(value: unknown): unknown {
     const proto = Object.getPrototypeOf(value);
     if (proto === Object.prototype || proto === null) {
       const record = value as Record<string, unknown>;
-      const out: Record<string, unknown> = {};
+      // No prototype, so a "__proto__" key is stored as data, not as a prototype.
+      const out: Record<string, unknown> = Object.create(null);
       for (const key of Object.keys(record).sort()) out[key] = normalize(record[key]);
       return out;
     }
