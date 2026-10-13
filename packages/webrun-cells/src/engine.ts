@@ -107,7 +107,10 @@ export class CellEngine {
 
   /** Put a dead-lettered input back in the queue with a fresh attempt count. */
   async requeue(cell: string, signal: string, key: string): Promise<void> {
-    if (!this.#cells.has(cell)) throw new Error(`Unknown cell "${cell}"`);
+    const target = this.#cells.get(cell);
+    if (!target) throw new Error(`Unknown cell "${cell}"`);
+    if (!target.inputs.includes(signal))
+      throw new Error(`Cell "${cell}" does not consume "${signal}"`);
     await this.#init();
     await this.#db.transaction([
       {

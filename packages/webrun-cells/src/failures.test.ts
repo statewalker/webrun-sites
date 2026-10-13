@@ -41,6 +41,13 @@ describe("failures", () => {
     await expect(engine.requeue("nope", "docs", "a")).rejects.toThrow(/Unknown cell "nope"/);
   });
 
+  it("refuses to requeue a signal the cell does not consume", async () => {
+    const engine = new CellEngine({ db: memDb(), cells: [copy(() => false)] });
+    await expect(engine.requeue("copy", "other", "a")).rejects.toThrow(
+      'Cell "copy" does not consume "other"',
+    );
+  });
+
   it("gives a dead-lettered input a fresh try when its source changes, and clears the dead letter", async () => {
     let broken = true;
     const engine = new CellEngine({ db: memDb(), cells: [copy(() => broken)], maxAttempts: 1 });
