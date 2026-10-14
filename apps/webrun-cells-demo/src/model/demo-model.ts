@@ -81,6 +81,7 @@ export class DemoModel {
   private readonly listeners = new Set<() => void>();
   private delayMs: number;
   private dirty = false;
+  private readonly mutations = new Set<Promise<void>>();
   private loop: Promise<void> | null = null;
   private refreshing: Promise<void> = Promise.resolve();
   private logId = 0;
@@ -114,13 +115,19 @@ export class DemoModel {
     this.delayMs = ms;
   }
 
-  async editFile(path: string, text: string): Promise<void> {
-    await this.engine.put("files", path, text);
-    await this.refreshFiles();
-    this.kick();
+  editFile(path: string, text: string): Promise<void> {
+    return this.track(async () => {
+      await this.engine.put("files", path, text);
+      await this.refreshFiles();
+      this.kick();
+    });
   }
 
-  async randomEdit(path: string, random: () => number = Math.random): Promise<void> {
+  randomEdit(path: string, random: () => number = Math.random): Promise<void> {
+    return this.track(() => this.randomEditNow(path, random));
+  }
+
+  private async randomEditNow(path: string, random: () => number): Promise<void> {
     const text = String((await this.engine.get("files", path)) ?? "");
     const sentences = text.match(/[^.!?]+[.!?]*/g) ?? [];
     if (sentences.length === 0) return;
@@ -129,10 +136,12 @@ export class DemoModel {
     await this.editFile(path, sentences.join(""));
   }
 
-  async deleteFile(path: string): Promise<void> {
-    await this.engine.remove("files", path);
-    await this.refreshFiles();
-    this.kick();
+  deleteFile(path: string): Promise<void> {
+    return this.track(async () => {
+      await this.engine.remove("files", path);
+      await this.refreshFiles();
+      this.kick();
+    });
   }
 
   async ask(text: string): Promise<string> {
@@ -140,9 +149,11 @@ export class DemoModel {
     // The search cell does not depend on the index signals, so a question handled
     // alongside pending indexing would search a half-built index. Let it drain first.
     await this.settled();
-    await this.engine.put("questions", id, { text, askedAt: Date.now() });
-    this.update({ questions: [...this.snapshot.questions, { id, text }] });
-    this.kick();
+    await this.track(async () => {
+      await this.engine.put("questions", id, { text, askedAt: Date.now() });
+      this.update({ questions: [...this.snapshot.questions, { id, text }] });
+      this.kick();
+    });
     return id;
   }
 
@@ -206,10 +217,18 @@ export class DemoModel {
 
   async settled(): Promise<void> {
     for (;;) {
+      await Promise.all([...this.mutations]);
       if (this.loop) await this.loop;
       await this.refreshing;
-      if (!this.loop && !this.dirty) return;
+      if (!this.loop && !this.dirty && this.mutations.size === 0) return;
     }
+  }
+
+  /** A mutation is visible to settled() from its first synchronous step until it has kicked the run loop. */
+  private track(fn: () => Promise<void>): Promise<void> {
+    const p = fn().finally(() => this.mutations.delete(p));
+    this.mutations.add(p);
+    return p;
   }
 
   private update(patch: Partial<DemoSnapshot>): void {
@@ -230,7 +249,8 @@ export class DemoModel {
       } finally {
         this.loop = null;
         await this.queuePendingRefresh();
-        this.update({ busy: false, running: null });
+        // A mutation may have kicked a new loop meanwhile; it owns busy/running now.
+        if (!this.loop && !this.dirty) this.update({ busy: false, running: null });
       }
     })();
   }

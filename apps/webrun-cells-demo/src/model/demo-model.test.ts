@@ -76,4 +76,61 @@ describe("DemoModel", () => {
     expect(after).not.toBe(before);
     expect(after.replace(" (rev 1).", ".")).toBe(before);
   });
+
+  it("settled() sees an edit still between put and run", async () => {
+    const model = await open();
+    await model.settled();
+    void model.editFile("docs/faq.md", "Fresh text. Two sentences.");
+    await model.settled();
+    const stages = await model.inspectFile("docs/faq.md");
+    expect(stages.blockSummaries.map((b) => b.text)).toEqual(["Fresh text. Two sentences."]);
+  });
+
+  it("busy stays true when an edit lands while the finished run refreshes the queue", async () => {
+    let model: DemoModel | undefined;
+    let kicked = false;
+    // Same real driver; the queue read that finds the queue empty lets an edit land before it returns.
+    class SlowDriver extends NodeSqlDriver {
+      constructor(db: DatabaseSync) {
+        super(db);
+        const all = this.all.bind(this) as (sql: string, ...params: unknown[]) => unknown[];
+        (this as { all: unknown }).all = async (sql: string, ...params: unknown[]) => {
+          const rows = all(sql, ...params);
+          if (
+            model &&
+            !kicked &&
+            sql.includes("cells_pending") &&
+            rows.length === 0 &&
+            !(model as unknown as { loop: unknown }).loop
+          ) {
+            kicked = true;
+            model.setDelay(15);
+            void model.editFile("docs/faq.md", "Late edit.");
+            await new Promise((r) => setTimeout(r, 20));
+          }
+          return rows;
+        };
+      }
+    }
+    model = await DemoModel.create({
+      db: new SlowDriver(new DatabaseSync(":memory:")),
+      seed: CORPUS,
+    });
+    let prev = model.getSnapshot();
+    const violations: string[] = [];
+    model.subscribe(() => {
+      const snap = (model as DemoModel).getSnapshot();
+      if (!prev.busy && snap.log.length > prev.log.length)
+        violations.push("run activity while busy=false");
+      prev = snap;
+    });
+    await model.settled();
+    await model.settled();
+    expect(kicked).toBe(true);
+    expect(violations).toEqual([]);
+    expect(model.getSnapshot().busy).toBe(false);
+    expect((await model.inspectFile("docs/faq.md")).blockSummaries.map((b) => b.text)).toEqual([
+      "Late edit.",
+    ]);
+  });
 });
