@@ -162,8 +162,9 @@ replaced `seq` is claimed as it now stands.
   *settled* producer emitted fails the input with `ConflictingEmission: <signal>/<key>: …`. A producer whose own
   input is still queued does not count: it is stale and runs again, so changing a shared value through all
   of its producers converges to the new value. Two engines sharing one database can race past this check
-  when they emit the same key at the same moment. The check reads before the commit, because the driver cannot
-  read inside a transaction.
+  when they emit the same key with different values while both producers' inputs are still queued: neither sees
+  the other as settled, both commit, and the last writer wins. The check reads before the commit, because the
+  driver cannot read inside a transaction.
 - **Emissions belong to the input the cell last pulled.** A cell must not pull ahead: buffering several inputs
   and then emitting attributes every output to the last input. Removing an earlier input then leaves its outputs
   behind, and removing the last one deletes outputs that other inputs still produce. Emit for each input before
