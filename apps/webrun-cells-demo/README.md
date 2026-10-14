@@ -34,7 +34,7 @@ then `pnpm --filter @statewalker/webrun-cells-demo preview` (also port 5180).
 
 ## Why the engine is real, not a simulation
 
-The queue counts, retries, early cut-off and retraction you see are the engine's own behaviour on a
+The queue counts, early cut-off and retraction you see are the engine's own behaviour on a
 real SQL database, so nothing on screen can drift from what the library does. Only the work inside
 the cells is faked, and the fakes are deterministic on purpose: summaries are extractive (first
 sentence; a file summary is the first three block summaries), vectors are 256-dimension hashed
@@ -66,7 +66,7 @@ handles an input so you can watch the cascade.
   existing answer. Use "Ask again" in the question's inspector to re-run it.
 - **A question waits for indexing.** `ask()` waits until indexing has drained before the question
   enters the engine, because `search` would otherwise read a half-built index. At a high step delay
-  the question first shows as "waiting for indexing..." in the ask bar.
+  the question first shows as "waiting for indexing…" in the ask bar.
 - **Inserting or removing a paragraph re-indexes every later block.** Blocks are keyed
   `path#<number>`, so numbers shift. An in-place edit re-indexes only the changed block: the other
   blocks produce equal rows and the cascade stops there.
@@ -74,13 +74,18 @@ handles an input so you can watch the cascade.
   driver, not from the demo's own bookkeeping.
 - **A page reload resets everything.** The database is `:memory:`; the seed files return, questions
   and edits are gone.
-- **A blank page with a 404 for `sqlite3.wasm` in the console** means `dist/sqlite3.wasm` is
-  missing. It is copied by the build (`scripts/copy-assets.js`), so run `build` (or `dev`, which
-  runs the copy at startup) rather than only bundling.
+- **A blank page whose console reads "wasm streaming compile failed: TypeError: Failed to execute
+  'compile' on 'WebAssembly': HTTP status code is not ok"**, followed by "failed to asynchronously
+  prepare wasm: both async and sync fetching of the wasm failed" and finally "Exception loading
+  sqlite3 module: RuntimeError: Aborted(both async and sync fetching of the wasm failed)" means
+  `dist/sqlite3.wasm` is missing (the 404 itself shows only in the Network panel). The build copies
+  it (`scripts/copy-assets.js`), so run `build` (or `dev`, which runs the copy at startup) rather
+  than only bundling.
 - **`preview` can serve a truncated bundle after a rebuild.** `sirv` without `--dev` caches file
   sizes at startup, so a rebuilt `main.js` that is larger is cut off and the console shows
   "Unexpected end of input". Restart `preview`. `dev` runs `sirv --dev` and is not affected.
-- **The port is requested as 5180, not guaranteed.** If 5180 is taken, `sirv` prints "Port 5180 is taken; using <n> instead" and serves there; open the URL it prints, not 5180.
+- **The port is requested as 5180, not guaranteed.** If 5180 is taken, `sirv` prints "Port 5180 is
+  taken; using <n> instead" and serves there; open the URL it prints, not 5180.
 
 ## Commands
 
