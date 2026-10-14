@@ -63,7 +63,8 @@ handles an input so you can watch the cascade.
 ## What will surprise you
 
 - **Answers are a snapshot of the index at ask time.** Editing a file afterwards does not change an
-  existing answer. Use "Ask again" in the question's inspector to re-run it.
+  existing answer. "Ask again" in the question's inspector re-searches the current index; if nothing
+  relevant changed, the cascade stops at `candidates` (early cut-off).
 - **A question waits for indexing.** `ask()` waits until indexing has drained before the question
   enters the engine, because `search` would otherwise read a half-built index. At a high step delay
   the question first shows as "waiting for indexing…" in the ask bar.
@@ -105,9 +106,9 @@ Run from `apps/webrun-cells-demo` (or with `pnpm --filter @statewalker/webrun-ce
 | --- | --- | --- | --- |
 | `split` | `files` | `file-blocks` | paragraphs split on blank lines |
 | `summarize` | `file-blocks` | `block-summaries` (`path#n`), `file-summaries` | whole-file cell |
-| `fts-index` | `block-summaries` | `fts-terms` | term frequencies and length |
-| `vector-index` | `block-summaries` | `vectors` | 256-dim hashed bag-of-words |
-| `plan` | `questions` | `queries` | split on `?`, `;`, "and" |
+| `fts-index` | `block-summaries` | `fts-terms` | indexes the block text (not the summary); term frequencies and length |
+| `vector-index` | `block-summaries` | `vectors` | embeds the block text (not the summary); 256-dim hashed bag-of-words |
+| `plan` | `questions` | `queries` | split on `?`, `;`, "and"; carries `askedAt` so a re-ask re-searches |
 | `search` | `queries` | `candidates` | BM25 and cosine over listed rows, top 5 each |
 | `rerank` | `candidates` | `ranked` | reciprocal-rank fusion, k = 60, top 5 |
 | `condense` | `ranked` | `context` | first sentence of the top 3 |

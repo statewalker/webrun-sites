@@ -23,6 +23,8 @@ export interface Question {
 export interface Queries {
   text: string;
   subqueries: string[];
+  /** Carried from the question so a re-ask changes this row and the search re-runs. */
+  askedAt: number;
 }
 export interface Hit {
   key: string;

@@ -34,8 +34,8 @@ export function subqueries(text: string): string[] {
 /** Best score per key over several ranked lists, descending. */
 function mergeMax(lists: { key: string; score: number }[][]): { key: string; score: number }[] {
   const best = new Map<string, number>();
-  for (const list of lists)
-    for (const r of list) best.set(r.key, Math.max(best.get(r.key) ?? 0, r.score));
+  for (const ranked of lists)
+    for (const r of ranked) best.set(r.key, Math.max(best.get(r.key) ?? 0, r.score));
   return [...best]
     .map(([key, score]) => ({ key, score }))
     .sort((a, b) => b.score - a.score || a.key.localeCompare(b.key));
@@ -48,8 +48,8 @@ export function questionCells(list: ListRows): Cell[] {
     outputs: ["queries"],
     async *run(inputs) {
       for await (const i of inputs) {
-        const { text } = i.value as unknown as Question;
-        const value: Queries = { text, subqueries: subqueries(text) };
+        const { text, askedAt } = i.value as unknown as Question;
+        const value: Queries = { text, subqueries: subqueries(text), askedAt };
         yield { signal: "queries", key: i.key, value: { ...value } };
       }
     },
@@ -88,7 +88,14 @@ export function questionCells(list: ListRows): Cell[] {
           fts: ftsRanked.slice(0, TOP).flatMap(toHit),
           vector: vecRanked.slice(0, TOP).flatMap(toHit),
         };
-        yield { signal: "candidates", key: i.key, value: JSON.parse(JSON.stringify(value)) };
+        yield {
+          signal: "candidates",
+          key: i.key,
+          value: {
+            fts: value.fts.map((h) => ({ ...h })),
+            vector: value.vector.map((h) => ({ ...h })),
+          },
+        };
       }
     },
   };

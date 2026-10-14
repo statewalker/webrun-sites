@@ -158,14 +158,18 @@ export class DemoModel {
   }
 
   async reask(id: string): Promise<void> {
-    const q = (await this.engine.get("questions", id)) as unknown as Question | undefined;
-    if (!q) return;
-    const now = Date.now();
-    await this.engine.put("questions", id, {
-      text: q.text,
-      askedAt: now === q.askedAt ? now + 1 : now,
+    // Same gate as ask(): search must not run beside pending indexing.
+    await this.settled();
+    await this.track(async () => {
+      const q = (await this.engine.get("questions", id)) as unknown as Question | undefined;
+      if (!q) return;
+      const now = Date.now();
+      await this.engine.put("questions", id, {
+        text: q.text,
+        askedAt: now === q.askedAt ? now + 1 : now,
+      });
+      this.kick();
     });
-    this.kick();
   }
 
   async inspectFile(path: string): Promise<FileStages> {
@@ -282,8 +286,9 @@ export class DemoModel {
           "SELECT cell, COUNT(*) AS n FROM cells_pending GROUP BY cell",
         )) as { cell: string; n: number }[];
         for (const r of rows) pending[r.cell] = Number(r.n);
-      } catch {
-        // the queue table exists only after the engine's first call
+      } catch (err) {
+        // the queue table exists only after the engine's first call; anything else is a real fault
+        if (!/no such table/i.test(String((err as Error)?.message ?? err))) throw err;
       }
       this.update({ pending });
     });

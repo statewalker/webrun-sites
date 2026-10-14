@@ -10,7 +10,12 @@ const open = (seed = CORPUS) =>
 describe("DemoModel", () => {
   it("seeds the corpus and settles with an empty queue", async () => {
     const model = await open();
+    let sawPending = false;
+    model.subscribe(() => {
+      if (Object.values(model.getSnapshot().pending).some((n) => n > 0)) sawPending = true;
+    });
     await model.settled();
+    expect(sawPending).toBe(true);
     const snap = model.getSnapshot();
     expect(snap.files.map((f) => f.path)).toEqual(Object.keys(CORPUS).sort());
     expect(Object.values(snap.pending).every((n) => n === 0)).toBe(true);
@@ -64,6 +69,17 @@ describe("DemoModel", () => {
     expect(model.getSnapshot().questions).toEqual([
       { id: "q1", text: "How do I install the package with pnpm?" },
     ]);
+  });
+
+  it("reask during indexing waits for the index and cites a file added since", async () => {
+    const model = await open();
+    const id = await model.ask("Where do zebras graze?");
+    await model.settled();
+    expect((await model.inspectQuestion(id)).answer?.citations).toEqual([]);
+    void model.editFile("docs/zebra.md", "Zebras graze on the savanna.");
+    await model.reask(id);
+    await model.settled();
+    expect((await model.inspectQuestion(id)).answer?.citations).toContain("docs/zebra.md");
   });
 
   it("randomEdit changes exactly one sentence", async () => {

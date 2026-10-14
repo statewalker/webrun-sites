@@ -58,6 +58,19 @@ describe("question pipeline", () => {
     expect(events.filter((e) => e.type === "start" && e.cell === "plan").map((e) => e.key)).toEqual(
       ["q1"],
     );
+    expect(
+      events.filter((e) => e.type === "start" && e.cell === "search").map((e) => e.key),
+    ).toEqual(["q1"]);
+  });
+
+  it("asking again re-searches the current index: a file added since now gets cited", async () => {
+    await seed();
+    const text = "Where do zebras graze?";
+    expect(await ask("q1", text, 1)).toEqual({ text: NO_MATCH, citations: [] });
+    await pipeline.engine.put("files", "docs/zebra.md", "Zebras graze on the savanna.");
+    await pipeline.engine.run();
+    const answer = await ask("q1", text, 2);
+    expect(answer.citations).toContain("docs/zebra.md");
   });
 
   it("no match: an empty index, or no matching terms, answers NO_MATCH without citations", async () => {
