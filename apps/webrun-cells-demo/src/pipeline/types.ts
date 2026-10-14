@@ -16,3 +16,30 @@ export interface VectorDoc {
   path: string;
   vector: number[];
 }
+export interface Question {
+  text: string;
+  askedAt: number;
+}
+export interface Queries {
+  text: string;
+  subqueries: string[];
+}
+export interface Hit {
+  key: string;
+  path: string;
+  score: number;
+  text: string;
+}
+export interface Candidates {
+  fts: Hit[];
+  vector: Hit[];
+}
+export interface ContextItem {
+  key: string;
+  path: string;
+  summary: string;
+}
+export interface Answer {
+  text: string;
+  citations: string[];
+}

@@ -1,6 +1,7 @@
 import { type Cell, CellEngine, type CellInput } from "@statewalker/webrun-cells";
 import type { SqlDriver } from "@statewalker/webrun-files-sqlite";
 import { INDEX_CELLS } from "./index-cells.js";
+import { type ListRows, questionCells } from "./question-cells.js";
 import type { PipelineEvent } from "./types.js";
 
 export interface PipelineOptions {
@@ -68,8 +69,10 @@ function observe(cell: Cell, onEvent: (e: PipelineEvent) => void, delay: () => n
 export function createPipeline(opts: PipelineOptions): Pipeline {
   const onEvent = opts.onEvent ?? (() => {});
   const delay = opts.delay ?? (() => 0);
-  const cells = [...INDEX_CELLS];
-  const engine = new CellEngine({
+  let engine: CellEngine | undefined;
+  const list: ListRows = (signal) => (engine as CellEngine).list(signal);
+  const cells = [...INDEX_CELLS, ...questionCells(list)];
+  engine = new CellEngine({
     db: opts.db,
     cells: cells.map((c) => observe(c, onEvent, delay)),
   });
