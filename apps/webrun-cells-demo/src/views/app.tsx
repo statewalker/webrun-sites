@@ -3,7 +3,11 @@ import { useState } from "react";
 import { Badge } from "../components/ui/badge.js";
 import { Slider } from "../components/ui/slider.js";
 import type { DemoModel } from "../model/demo-model.js";
+import { AskBar } from "./ask-bar.js";
 import { FilesPanel } from "./files-panel.js";
+import { GraphPanel } from "./graph-panel.js";
+import { InspectorPanel } from "./inspector-panel.js";
+import { LogPanel } from "./log-panel.js";
 import { useDemo } from "./use-demo.js";
 
 export type Selection = { kind: "file"; path: string } | { kind: "question"; id: string } | null;
@@ -43,7 +47,7 @@ export function App({ model }: { model: DemoModel }) {
           <Badge variant="outline">idle</Badge>
         )}
       </header>
-      <main className="grid min-h-0 grid-cols-[16rem_1fr_24rem]">
+      <main className="grid min-h-0 grid-cols-[16rem_minmax(0,1fr)_24rem]">
         <section className="min-h-0 border-r">
           <FilesPanel
             model={model}
@@ -51,10 +55,29 @@ export function App({ model }: { model: DemoModel }) {
             onSelect={(path) => setSelection({ kind: "file", path })}
           />
         </section>
-        <section className="min-h-0 p-4 text-sm text-muted-foreground">Graph</section>
-        <section className="min-h-0 border-l p-4 text-sm text-muted-foreground">Inspector</section>
+        <section className="flex min-h-0 flex-col">
+          <div className="max-h-[60%] shrink-0 overflow-auto border-b">
+            <GraphPanel model={model} />
+          </div>
+          <div className="min-h-0 flex-1">
+            <LogPanel model={model} />
+          </div>
+        </section>
+        <section className="min-h-0 border-l">
+          <InspectorPanel
+            model={model}
+            selection={selection}
+            onSelectFile={(path) => setSelection({ kind: "file", path })}
+          />
+        </section>
       </main>
-      <footer className="border-t p-3 text-sm text-muted-foreground">Ask bar</footer>
+      <footer className="border-t">
+        <AskBar
+          model={model}
+          selected={selection?.kind === "question" ? selection.id : null}
+          onSelect={(id) => setSelection({ kind: "question", id })}
+        />
+      </footer>
     </div>
   );
 }

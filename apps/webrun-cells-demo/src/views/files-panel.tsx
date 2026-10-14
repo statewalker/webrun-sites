@@ -4,6 +4,7 @@ import { Button } from "../components/ui/button.js";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -105,6 +106,9 @@ export function FilesPanel({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{editing?.path ?? "New file"}</DialogTitle>
+            <DialogDescription className="sr-only">
+              Saving puts the text into the files signal; the cells re-index it.
+            </DialogDescription>
           </DialogHeader>
           {editing?.path === null && (
             <Input
@@ -122,7 +126,9 @@ export function FilesPanel({
             <Button variant="outline" onClick={() => setEditing(null)}>
               Cancel
             </Button>
-            <Button onClick={save}>Save</Button>
+            <Button onClick={save} disabled={editing?.path === null && newPath.trim() === ""}>
+              Save
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
