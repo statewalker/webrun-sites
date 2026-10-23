@@ -1,7 +1,7 @@
 {
   "name": "@statewalker/webrun-cells",
   "version": "0.0.0",
-  "private": false,
+  "private": true,
   "type": "module",
   "description": "SQLite-backed incremental cell engine: signal rows, a work queue, provenance and dead letters in SQL tables; early cut-off on unchanged outputs and provenance-based retraction.",
   "bugs": {
