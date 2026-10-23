@@ -53,6 +53,9 @@ export function proxyBody(args: {
    *  decides the `export { default }` line; when omitted (a `cdn` URL nothing can
    *  introspect) the line falls back to this importer's shape. */
   endpointHasDefault?: boolean;
+  /** The host instance's own keys, for a `host` binding imported as a namespace.
+   *  Supplied by the caller because only it can read the registry. */
+  hostNames?: string[];
 }): string {
   const { binding, imp } = args;
   const named = imp.names.filter((n) => IDENT_RE.test(n) && n !== "default");
@@ -63,10 +66,20 @@ export function proxyBody(args: {
     const lines = [
       `const __m = globalThis.${args.registryKey}.get(${JSON.stringify(binding.name)});`,
     ];
-    if (imp.hasDefault || (!named.length && !imp.hasNamespace)) lines.push("export default __m;");
-    for (const n of [...new Set(named)]) lines.push(`export const ${n} = __m.${n};`);
-    // Namespace (`* as X`) of a host module can't be enumerated — default-as-instance
-    // covers property access; a true enumerated namespace is unsupported (documented).
+    if (imp.hasDefault || imp.hasNamespace || !named.length) lines.push("export default __m;");
+    const unique = [...new Set(named)];
+    for (const n of unique) lines.push(`export const ${n} = __m.${n};`);
+    // ESM cannot `export *` from a runtime object, so a namespace (`* as X`) gets the
+    // keys the instance has NOW, at emit time. Alias form: a key may be a reserved
+    // word (`delete`), legal as an export name but not as a `const`.
+    if (imp.hasNamespace) {
+      const extra = (args.hostNames ?? []).filter(
+        (n) => IDENT_RE.test(n) && n !== "default" && !unique.includes(n),
+      );
+      extra.forEach((n, i) => {
+        lines.push(`const __h${i} = __m[${JSON.stringify(n)}];`, `export { __h${i} as ${n} };`);
+      });
+    }
     return lines.join("\n");
   }
 

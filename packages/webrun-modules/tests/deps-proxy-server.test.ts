@@ -235,6 +235,26 @@ describe("~deps proxy layer", () => {
     expect(proxy).toContain("export * from");
   });
 
+  it("namespace-only import of a provided module exposes the instance's members", async () => {
+    const deepEqual = () => true;
+    const lib = { deepEqual, ok: () => true };
+    const registry = newHostRegistry({ "host-lib": { ...lib, default: lib } });
+    const { p, ready } = projectWith(
+      `import * as assert from "host-lib";\nexport const v = assert.deepEqual;`,
+    );
+    await ready;
+    const server = newModuleServer({ cache: new MemFilesApi(), project: p, provided: registry });
+    await server.fetch(new Request("http://h/~/app.ts")); // generates the proxy
+    const proxy = await (
+      await server.fetch(new Request("http://h/~/~deps/host-lib/index.js"))
+    ).text();
+    // The served proxy, evaluated against the realm registry the server installed.
+    const ns = await import(`data:text/javascript,${encodeURIComponent(proxy)}`);
+    expect(ns.deepEqual).toBe(deepEqual);
+    expect(ns.ok).toBe(lib.ok);
+    expect(ns.default).toBe(registry.get("host-lib"));
+  });
+
   it("re-link: a custom resolver changes only the proxy body, not the module's own imports", async () => {
     const src = `import x from "dep"; export const v = x;`;
     const pA = new MemFilesApi();

@@ -415,11 +415,17 @@ export async function ensureProxy(
       // Unreadable ⇒ leave the decision to the importer shape rather than guess.
       endpointHasDefault = facts.loadable ? facts.hasDefault : undefined;
     }
+    // A namespace import of a host module exports the instance's keys, read here.
+    const hostNames =
+      merged.binding.kind === "host" && merged.imp.hasNamespace
+        ? Object.keys(ctx.registry.get(merged.binding.name) ?? {})
+        : undefined;
     const body = proxyBody({
       binding: wire,
       imp: merged.imp,
       registryKey: HOST_REGISTRY_KEY,
       endpointHasDefault,
+      hostNames,
     });
     const shape = JSON.stringify(merged.imp); // snapshotted with the body, synchronously
     // Sidecar BEFORE the body, from the SAME snapshot. A torn write must leave the

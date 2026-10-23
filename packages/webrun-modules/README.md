@@ -631,12 +631,17 @@ target is `local`, `host`, or `cdn`, with the proxy resolving the binding:
   modules do work — see [Acquire, resolve, transform](#acquire-resolve-transform-one-file-in-one-esm-file-out).
 - Bundling/copying the resolved graph into a distributable tree, `.d.ts` type
   serving, package lifecycle scripts, and HMR are out of scope.
-- **`import * as X` of a host-provided module** can't enumerate the instance's
-  keys as named bindings (an ESM proxy can't introspect an arbitrary runtime
-  object) — only `import X from "…"` (default = the instance itself, covering
-  property access) and explicitly-named imports are supported for `host`
-  bindings. Ordinary (non-provided) npm/local deps have no such limit —
-  `export *` re-exports the real module.
+- **`import * as X` of a host-provided module gets the keys the server's
+  registry entry has when the proxy is emitted.** ESM cannot `export *` from a
+  runtime object, so the proxy exports one binding per own enumerable key of the
+  instance the server sees (plus `default`, the instance itself). The values are
+  still read live in the importing realm; only the key list is fixed at emit time.
+  So a `provided` entry registered as a `{}` placeholder — or set on a live
+  `HostRegistry` after the proxy was first served — yields a namespace with only
+  `default`, and `X.deepEqual(…)` fails with `TypeError: X.deepEqual is not a
+  function`. Register the real object, or one with the same keys, in the server's
+  realm. Ordinary (non-provided) npm/local deps have no such limit — `export *`
+  re-exports the real module.
 
 ### Utilities
 
