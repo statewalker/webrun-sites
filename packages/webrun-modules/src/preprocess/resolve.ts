@@ -150,7 +150,9 @@ export async function resolveSpec(
   ctx: PreprocessContext,
 ): Promise<{ url: string; id?: string; endpointId?: string }> {
   if (/^(https?:|data:)/.test(spec)) return { url: spec }; // absolute — pass through
-  const builtin = resolveNodeBuiltin(spec, ctx.target); // node: builtins → polyfill/external
+  // Host-provided names win, `node:*` included: the host's module replaces the polyfill.
+  const provided = !spec.startsWith(".") && providedNames(spec, ctx);
+  const builtin = provided ? undefined : resolveNodeBuiltin(spec, ctx.target); // → polyfill/external
   if (builtin) {
     if ("external" in builtin) return { url: builtin.external };
     const t = await ensurePackage(builtin.ref, ctx);
@@ -162,8 +164,6 @@ export async function resolveSpec(
     // marks json/css with `?module`; the browser fetches this URL verbatim.
     return { url: ctx.policy.servedUrl(id, fromId), id };
   }
-  // Host-provided/builtin wins before the CSS reroute below.
-  const provided = providedNames(spec, ctx);
   // Bare CSS-looking specifier — CSS never goes through `~deps`; resolve it directly
   // like the relative branch, then classify by the RESOLVED file, not the raw spec.
   if (!provided && isCssFile(spec)) {

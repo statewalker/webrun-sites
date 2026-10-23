@@ -570,6 +570,10 @@ target is `local`, `host`, or `cdn`, with the proxy resolving the binding:
   name reads `globalThis.__webrunHostRegistry.get(name)`, so all importers of
   `react` (or any provided key, including a class used as an adapter-map key)
   observe the **same reference** — real object identity, not a copy.
+  A provided name also wins over a Node builtin: registering `node:crypto`
+  replaces the `@jspm/core` polyfill for that one module (a host that needs
+  more than the polyfill offers, e.g. `crypto.timingSafeEqual`, supplies its
+  own); builtins it does not register keep the polyfill.
   *Caveat:* a live `HostRegistry` installs **itself** as the single realm-global
   registry, so in a multi-`newModuleServer` **Node** process the last one wins;
   single-realm browser use is the intended case.

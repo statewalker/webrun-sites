@@ -160,6 +160,28 @@ describe("~deps proxy layer", () => {
     expect(subProxy).toContain('globalThis.__webrunHostRegistry.get("react/jsx-runtime")');
   });
 
+  it("a host-provided node:* module wins over the built-in polyfill", async () => {
+    const { p, ready } = projectWith(
+      `import { timingSafeEqual } from "node:crypto";\nimport { sep } from "node:path";\nexport const t = [timingSafeEqual, sep];`,
+    );
+    await ready;
+    const server = newModuleServer({
+      cache: new MemFilesApi(),
+      project: p,
+      target: "browser",
+      provided: newHostRegistry({ "node:crypto": { timingSafeEqual: () => true } }),
+    });
+    const code = await (await server.fetch(new Request("http://h/~/app.ts"))).text();
+    const crypto = code.match(/from "([^"]*crypto[^"]*)"/)?.[1] ?? "";
+    expect(crypto).toContain("~deps/");
+    const proxy = await (
+      await server.fetch(new Request(new URL(crypto, "http://h/~/app.ts")))
+    ).text();
+    expect(proxy).toContain('globalThis.__webrunHostRegistry.get("node:crypto")');
+    // a builtin the host does not provide still maps to the polyfill
+    expect(code).toMatch(/from "[^"]*@jspm\/core[^"]*path[^"]*"/);
+  });
+
   it("two modules importing a provided react see the SAME instance (identity)", async () => {
     const instance = { useState: () => 0, tag: Symbol("react") };
     const registry = newHostRegistry({ react: instance });
