@@ -182,6 +182,31 @@ describe("~deps proxy layer", () => {
     expect(code).toMatch(/from "[^"]*@jspm\/core[^"]*path[^"]*"/);
   });
 
+  it("a provided Node builtin covers both spellings: crypto ⇄ node:crypto", async () => {
+    for (const [registered, imported] of [
+      ["node:crypto", "crypto"],
+      ["crypto", "node:crypto"],
+    ]) {
+      const { p, ready } = projectWith(
+        `import { timingSafeEqual } from "${imported}";\nexport const t = timingSafeEqual;`,
+      );
+      await ready;
+      const server = newModuleServer({
+        cache: new MemFilesApi(),
+        project: p,
+        target: "browser",
+        provided: newHostRegistry({ [registered]: { timingSafeEqual: () => true } }),
+      });
+      const code = await (await server.fetch(new Request("http://h/~/app.ts"))).text();
+      const url = code.match(/from "([^"]*crypto[^"]*)"/)?.[1] ?? "";
+      expect(url, `${registered} ← ${imported}`).toContain("~deps/");
+      const proxy = await (
+        await server.fetch(new Request(new URL(url, "http://h/~/app.ts")))
+      ).text();
+      expect(proxy).toContain(`globalThis.__webrunHostRegistry.get("${registered}")`);
+    }
+  });
+
   it("two modules importing a provided react see the SAME instance (identity)", async () => {
     const instance = { useState: () => 0, tag: Symbol("react") };
     const registry = newHostRegistry({ react: instance });
