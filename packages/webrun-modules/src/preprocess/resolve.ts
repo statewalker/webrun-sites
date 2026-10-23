@@ -4,7 +4,7 @@ import semver from "semver";
 import { newDefaultEndpointResolver } from "../deps/endpoint-resolver.js";
 import { HOST_REGISTRY_KEY } from "../deps/host-registry.js";
 import { proxyBody, proxyId } from "../deps/proxy.js";
-import { resolveNodeBuiltin } from "../resolution/node-builtins.js";
+import { nodeBuiltinName, resolveNodeBuiltin } from "../resolution/node-builtins.js";
 import { resolveEntry } from "../resolution/resolve-entry.js";
 import { parseSpecifier, relativeUrl } from "../server/specifiers.js";
 import { analyze, detectFormat } from "../transform/index.js";
@@ -40,10 +40,20 @@ async function collect(chunks: AsyncIterable<Uint8Array>): Promise<Uint8Array> {
   return out;
 }
 
-/** A name is host-provided when the registry holds the exact name OR its package
- *  root (so both `react` and `react/jsx-runtime` bind to the `react` instance). */
+/** The registry key a name binds to: the exact name, else its package root (so both
+ *  `react` and `react/jsx-runtime` bind to the `react` instance). A Node builtin also
+ *  matches its other spelling (`crypto` ⇄ `node:crypto`). */
+export function providedKey(name: string, ctx: PreprocessContext): string | undefined {
+  if (name === "") return undefined;
+  const builtin = nodeBuiltinName(name);
+  const names =
+    builtin === undefined ? [name] : [name, name.startsWith("node:") ? builtin : `node:${builtin}`];
+  return [...names, ...names.map((n) => parseSpecifier(n).pkg)].find((k) => ctx.registry.has(k));
+}
+
+/** A name is host-provided when {@link providedKey} finds it in the registry. */
 export function providedNames(name: string, ctx: PreprocessContext): boolean {
-  return name !== "" && (ctx.registry.has(name) || ctx.registry.has(parseSpecifier(name).pkg));
+  return providedKey(name, ctx) !== undefined;
 }
 
 /** The default linker: `host` for provided names, same-origin `local` (via package
@@ -151,7 +161,7 @@ export async function resolveSpec(
 ): Promise<{ url: string; id?: string; endpointId?: string }> {
   if (/^(https?:|data:)/.test(spec)) return { url: spec }; // absolute — pass through
   // Host-provided names win, `node:*` included: the host's module replaces the polyfill.
-  const provided = !spec.startsWith(".") && providedNames(spec, ctx);
+  const provided = spec.startsWith(".") ? undefined : providedKey(spec, ctx);
   const builtin = provided ? undefined : resolveNodeBuiltin(spec, ctx.target); // → polyfill/external
   if (builtin) {
     if ("external" in builtin) return { url: builtin.external };
@@ -176,10 +186,7 @@ export async function resolveSpec(
   let binding: EndpointBinding;
   let endpointId: string | undefined;
   if (provided) {
-    // Bind to the registered key — the exact spec if registered, else its package
-    // root (so `react/jsx-runtime` reads the `react` instance).
-    const providedKey = ctx.registry.has(spec) ? spec : parseSpecifier(spec).pkg;
-    binding = { kind: "host", name: providedKey };
+    binding = { kind: "host", name: provided }; // the registered key (see providedKey)
   } else {
     binding = await ctx.resolveEndpoint.resolve(spec, { importerId: fromId, target: ctx.target });
     if (binding.kind === "local") endpointId = binding.url; // canonical id → walked
