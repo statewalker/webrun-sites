@@ -1,5 +1,11 @@
 # @statewalker/webrun-modules
 
+## 0.3.5
+
+### Patch Changes
+
+- 197f670: A host-provided `node:*` module now wins over the built-in `@jspm/core` polyfill, as other provided names already did.
+
 ## 0.3.4
 
 ### Patch Changes

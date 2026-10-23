@@ -1,5 +1,17 @@
 # @statewalker/webrun-modules-build
 
+## 0.2.2
+
+### Patch Changes
+
+- Release of the changes since the last published version:
+  
+  - @statewalker/webrun-modules ^0.3.3 -> ^0.3.4
+- Updated dependencies
+- Updated dependencies [197f670]
+  - @statewalker/webrun-tailwind@0.2.2
+  - @statewalker/webrun-modules@0.3.5
+
 ## 0.2.1
 
 ### Patch Changes
