@@ -98,8 +98,8 @@ export class HostedSiteBuilder {
     await adapter.start();
 
     let baseUrl = "";
-    const registration = await adapter.register(`${siteKey}/`, (request) =>
-      handler(rewriteToSiteRelative(request, () => baseUrl)),
+    const registration = await adapter.register(`${siteKey}/`, async (request) =>
+      handler(await rewriteToSiteRelative(request, () => baseUrl)),
     );
     baseUrl = registration.baseUrl;
 
@@ -182,8 +182,11 @@ export function newServerRunner(
  * Strip the site's base URL from the request (the `/<key>/...` prefix
  * the SW layer uses for routing) so the inner `SiteHandler` sees plain
  * site-relative paths like `/client/...` or `/api`.
+ *
+ * Firefox has no `Request.body`, so there the body is read whole instead
+ * of streamed.
  */
-function rewriteToSiteRelative(request: Request, getBaseUrl: () => string): Request {
+async function rewriteToSiteRelative(request: Request, getBaseUrl: () => string): Promise<Request> {
   const baseUrl = getBaseUrl();
   const relative =
     baseUrl && request.url.startsWith(baseUrl)
@@ -193,7 +196,10 @@ function rewriteToSiteRelative(request: Request, getBaseUrl: () => string): Requ
   const init: RequestInit = {
     method: request.method,
     headers: request.headers,
-    body: request.method === "GET" || request.method === "HEAD" ? null : request.body,
+    body:
+      request.method === "GET" || request.method === "HEAD"
+        ? null
+        : (request.body ?? (await request.blob())),
     duplex: "half",
   } as RequestInit & { duplex: "half" };
   return new Request(`http://site.local${normalized}`, init);

@@ -177,6 +177,10 @@ for callers whose own API accepts either form.
 - **Your handler sees `http://site.local/...` URLs.** Requests are rebuilt with
   that origin and the site-relative path. Use `site.baseUrl` when you need the
   real URL.
+- **In Firefox, request bodies are buffered, not streamed.** Firefox has no
+  `Request.body`, so the rebuilt request carries the body read whole with
+  `blob()`. Other browsers stream it. A large upload is therefore held in
+  memory before your handler runs.
 - **Node can import the package, but cannot run `build()`**: there is no
   `navigator.serviceWorker`. Under Node, use the `SiteHandler` directly.
 

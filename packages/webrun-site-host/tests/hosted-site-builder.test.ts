@@ -71,6 +71,24 @@ describe("HostedSiteBuilder", () => {
     expect(((await response.json()) as { url: string }).url).toBe("http://site.local/seen");
   });
 
+  it("forwards the request body to the handler", async () => {
+    const { builder, getAdapter } = newBuilder();
+    builder.setHandler(async (request) => new Response(await request.text()));
+    await builder.build();
+    const response = await getAdapter().dispatch("/echo", { method: "POST", body: "hello" });
+    expect(await response.text()).toBe("hello");
+  });
+
+  it("forwards the request body when Request has no `body` property (Firefox)", async () => {
+    const { builder, getAdapter } = newBuilder();
+    builder.setHandler(async (request) => new Response(await request.text()));
+    await builder.build();
+    const request = new Request(getAdapter().url("/echo"), { method: "POST", body: "hello" });
+    Object.defineProperty(request, "body", { value: undefined });
+    const response = await getAdapter().handler?.(request);
+    expect(await response?.text()).toBe("hello");
+  });
+
   it("HostedSite.stop() removes the registration AND stops the adapter", async () => {
     const { builder, getAdapter } = newBuilder();
     const site = await builder.setHandler(async () => new Response("pong")).build();
