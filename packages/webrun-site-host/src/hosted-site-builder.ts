@@ -184,7 +184,9 @@ export function newServerRunner(
  * site-relative paths like `/client/...` or `/api`.
  *
  * Firefox has no `Request.body`, so there the body is read whole instead
- * of streamed.
+ * of streamed. The check is on `Request.prototype` itself: a polyfilled
+ * `body` further down the chain yields a stream that Firefox's `new Request`
+ * would store as the text "[object ReadableStream]".
  */
 async function rewriteToSiteRelative(request: Request, getBaseUrl: () => string): Promise<Request> {
   const baseUrl = getBaseUrl();
@@ -199,7 +201,9 @@ async function rewriteToSiteRelative(request: Request, getBaseUrl: () => string)
     body:
       request.method === "GET" || request.method === "HEAD"
         ? null
-        : (request.body ?? (await request.blob())),
+        : Object.getOwnPropertyDescriptor(Request.prototype, "body")
+          ? request.body
+          : await request.blob(),
     duplex: "half",
   } as RequestInit & { duplex: "half" };
   return new Request(`http://site.local${normalized}`, init);

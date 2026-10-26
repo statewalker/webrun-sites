@@ -83,10 +83,26 @@ describe("HostedSiteBuilder", () => {
     const { builder, getAdapter } = newBuilder();
     builder.setHandler(async (request) => new Response(await request.text()));
     await builder.build();
-    const request = new Request(getAdapter().url("/echo"), { method: "POST", body: "hello" });
-    Object.defineProperty(request, "body", { value: undefined });
-    const response = await getAdapter().handler?.(request);
-    expect(await response?.text()).toBe("hello");
+    const response = await withoutRequestBody(() =>
+      getAdapter().dispatch("/echo", { method: "POST", body: "hello" }),
+    );
+    expect(await response.text()).toBe("hello");
+  });
+
+  it("reads the body whole when only a polyfill below Request.prototype has `body`", async () => {
+    const { builder, getAdapter } = newBuilder();
+    builder.setHandler(async (request) => new Response(await request.text()));
+    await builder.build();
+    const response = await withoutRequestBody(() => {
+      const request = new Request(getAdapter().url("/echo"), { method: "POST", body: "hello" });
+      // Firefox would turn this stream into the text "[object ReadableStream]".
+      const polyfill = Object.create(Request.prototype, {
+        body: { get: () => new Blob(["[object ReadableStream]"]).stream() },
+      });
+      Object.setPrototypeOf(request, polyfill);
+      return getAdapter().handler?.(request) ?? Promise.reject(new Error("no handler"));
+    });
+    expect(await response.text()).toBe("hello");
   });
 
   it("HostedSite.stop() removes the registration AND stops the adapter", async () => {
@@ -177,3 +193,15 @@ describe("HostedSiteBuilder", () => {
     expect(await response.json()).toEqual({ params: { id: "9" } });
   });
 });
+
+/** Run `fn` in a Firefox-like realm: `Request.prototype` has no own `body`. */
+async function withoutRequestBody<T>(fn: () => Promise<T>): Promise<T> {
+  const descriptor = Object.getOwnPropertyDescriptor(Request.prototype, "body");
+  if (!descriptor) throw new Error("expected Request.prototype.body in Node");
+  Reflect.deleteProperty(Request.prototype, "body");
+  try {
+    return await fn();
+  } finally {
+    Object.defineProperty(Request.prototype, "body", descriptor);
+  }
+}
