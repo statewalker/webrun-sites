@@ -1,5 +1,11 @@
 # @statewalker/webrun-site-host
 
+## 0.2.5
+
+### Patch Changes
+
+- e870564: Request bodies reach the handler in Firefox. Firefox has no `Request.body`, so the rebuilt site-relative request lost its body; it now carries the body read whole.
+
 ## 0.2.4
 
 ### Patch Changes

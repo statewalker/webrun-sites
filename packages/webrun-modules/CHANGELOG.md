@@ -1,5 +1,11 @@
 # @statewalker/webrun-modules
 
+## 0.3.6
+
+### Patch Changes
+
+- 54e2f6a: A provided Node builtin covers both spellings: registering `node:crypto` also serves a bare `crypto` import, and the reverse.
+
 ## 0.3.5
 
 ### Patch Changes
