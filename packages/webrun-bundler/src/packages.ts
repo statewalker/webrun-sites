@@ -9,29 +9,43 @@ const mountPrefix = (name: string, version: string | undefined) =>
  * Packages from `node_modules` folders, found as Node finds them: in the importing
  * file's directory and each parent, inside the importer's own FilesApi. A package
  * installed in the project (or in another package's `node_modules`) is read where it is.
+ *
+ * pnpm layouts: a package's own dependencies sit next to its real directory in
+ * `node_modules/.pnpm`, which Node reaches through the symlink's real path and a FilesApi
+ * cannot see. When the walk finds nothing, each ancestor's `node_modules/.pnpm/node_modules`
+ * (pnpm's hoisted links to every installed package) is tried too.
  */
 export function nodeModulesPackages(): PackageStore {
   const mounts = new Map<string, Mount>();
+  const at = async (files: Mount["files"], root: string, name: string) => {
+    const known = mounts.get(root);
+    if (known && known.files === files) return known;
+    const manifest = await readManifest(files, root);
+    if (!manifest) return undefined;
+    const mount: Mount = { prefix: mountPrefix(name, manifest.version), files, root, manifest };
+    mounts.set(root, mount);
+    return mount;
+  };
+  const ancestors = (path: string) => {
+    const dirs: string[] = [];
+    for (let dir = dirOf(path); ; dir = dirOf(dir)) {
+      dirs.push(dir === "/" ? "" : dir);
+      if (dir === "/") return dirs;
+    }
+  };
   return {
     async get(name, importer) {
       const files = importer.mount.files;
-      for (let dir = dirOf(importer.path); ; dir = dirOf(dir)) {
-        const root = `${dir === "/" ? "" : dir}/node_modules/${name}`;
-        const known = mounts.get(root);
-        if (known && known.files === files) return known;
-        const manifest = await readManifest(files, root);
-        if (manifest) {
-          const mount: Mount = {
-            prefix: mountPrefix(name, manifest.version),
-            files,
-            root,
-            manifest,
-          };
-          mounts.set(root, mount);
-          return mount;
-        }
-        if (dir === "/") return undefined;
+      const dirs = ancestors(importer.path);
+      for (const dir of dirs) {
+        const m = await at(files, `${dir}/node_modules/${name}`, name);
+        if (m) return m;
       }
+      for (const dir of dirs) {
+        const m = await at(files, `${dir}/node_modules/.pnpm/node_modules/${name}`, name);
+        if (m) return m;
+      }
+      return undefined;
     },
   };
 }

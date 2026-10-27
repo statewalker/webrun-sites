@@ -304,6 +304,66 @@ describe("bundle", () => {
     );
   });
 
+  it("host modules (by name or function) and inject; their lines map to virtual:<specifier>", async () => {
+    const files = await filesOf({
+      "/src/main.ts":
+        'import { env } from "cloudflare:workers";\nimport { join } from "node:path";\nimport { tag } from "./tag.ts";\nexport const out = [env.NAME, join("a", "b"), tag, new Response("r").kind];\n',
+      "/src/tag.ts": 'export const tag: string = "tag";\n',
+      "/src/shim.ts":
+        'export class Response { kind = "shimmed"; constructor(public body: string) {} }\n',
+    });
+    const r = await bundle({
+      esbuild,
+      files,
+      entry: "/src/main.ts",
+      modules: (spec) =>
+        spec === "cloudflare:workers"
+          ? 'export const env = { NAME: "host-env" };\n'
+          : spec.startsWith("node:")
+            ? `export const join = (...p) => p.join("/") + ${JSON.stringify(`<${spec}>`)};\n`
+            : undefined,
+      inject: ["/src/shim.ts"],
+    });
+    expect((await run(r.code)).out).toEqual(["host-env", "a/b<node:path>", "tag", "shimmed"]);
+    expect(r.map.sources).toEqual(
+      expect.arrayContaining([
+        "virtual:cloudflare:workers",
+        "virtual:node:path",
+        "~/src/main.ts",
+        "~/src/shim.ts",
+      ]),
+    );
+    // a record works too, and an unknown specifier still resolves as usual
+    const r2 = await bundle({
+      esbuild,
+      files,
+      entry: "/src/main.ts",
+      modules: {
+        "cloudflare:workers": "export const env = { NAME: 1 };\n",
+        "node:path": "export const join = () => 2;\n",
+      },
+    });
+    expect((await run(r2.code)).out.slice(0, 3)).toEqual([1, 2, "tag"]);
+  });
+
+  it("pnpm layouts: a package's own dependencies come from node_modules/.pnpm/node_modules", async () => {
+    const files = await filesOf({
+      "/app/main.js": 'import { a } from "a";\nexport const out = a;\n',
+      // node_modules/a is a symlink into .pnpm in a real install; its dependency b is only
+      // next to a's real directory, reachable through pnpm's hoisted links.
+      "/app/node_modules/a/package.json": JSON.stringify({ name: "a", version: "1.0.0" }),
+      "/app/node_modules/a/index.js": 'import { b } from "b";\nexport const a = "a+" + b;\n',
+      "/app/node_modules/.pnpm/node_modules/b/package.json": JSON.stringify({
+        name: "b",
+        version: "4.0.0",
+      }),
+      "/app/node_modules/.pnpm/node_modules/b/index.js": 'export const b = "b";\n',
+    });
+    const r = await bundle({ esbuild, files, root: "/app", entry: "/main.js" });
+    expect((await run(r.code)).out).toBe("a+b");
+    expect(r.map.sources).toContain("npm:b@4.0.0/index.js");
+  });
+
   it("inline maps: the bundle carries its own map", async () => {
     const files = await filesOf({ "/a.ts": "export const a: number = 1; // MARK_A\n" });
     const r = await bundle({ esbuild, files, entry: "/a.ts", sourcemap: "inline" });

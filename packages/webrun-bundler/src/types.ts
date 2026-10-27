@@ -78,6 +78,18 @@ export interface BundleOptions {
   /** Specifiers kept as imports for the runtime. `http(s):` and `data:` URLs always are. */
   external?: ExternalPattern[];
   /**
+   * Modules the host supplies, by specifier (`cloudflare:workers`, `node:buffer`): their
+   * JavaScript source, or `undefined` to resolve the specifier as usual. They come before
+   * `external`. Their own imports resolve from the project's root; they name themselves
+   * `virtual:<specifier>` in the source map.
+   */
+  modules?: Record<string, string> | ((specifier: string) => string | undefined);
+  /**
+   * Modules whose exports replace the globals of the same name in every bundled file
+   * (esbuild `inject`): specifiers or project paths, resolved like imports (`modules` too).
+   */
+  inject?: string[];
+  /**
    * `package.json` `exports` conditions besides `import`/`require` and `default`
    * (default `["browser"]`; a workerd target takes `["workerd", "worker", "browser"]`).
    */

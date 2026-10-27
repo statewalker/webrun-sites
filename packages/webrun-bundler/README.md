@@ -78,6 +78,8 @@ const { code, map } = await transpile(source, { esbuild, path: "~/src/f.ts", low
 | `entry` | required | the entry module, a project path |
 | `packages` | `nodeModulesPackages()` | where bare specifiers go |
 | `external` | `[]` | specifiers kept as imports; `"x:*"` is a prefix. `http(s):`/`data:` always are |
+| `modules` | | modules the host supplies by specifier (a record, or a function returning source or `undefined`); mapped as `virtual:<specifier>` |
+| `inject` | | modules whose exports replace same-named globals in every file (esbuild `inject`), resolved like imports |
 | `conditions` | `["browser"]` | `exports` conditions besides `import`/`require` and `default` |
 | `format`, `platform`, `target` | `esm`, `browser`, `es2022` | as in esbuild |
 | `lowerAwait` | `false` | lower `async`/`await`, async generators and `for await` to generators |
@@ -94,6 +96,24 @@ const { code, map } = await transpile(source, { esbuild, path: "~/src/f.ts", low
 project's for project files, the package's own for its dependencies), else the latest. One range
 loads once, and two ranges that land on one version share it. Pass `source` to fetch from
 elsewhere (any `@statewalker/webrun-modules` `Source`).
+
+### The host supplies its runtime's modules
+
+A runtime embedding the bundle provides modules the bundle cannot read from files: `cloudflare:workers`,
+`node:*` polyfills from its own realm, its own `Response`. `modules` gives their source by
+specifier (a function can cover a whole family), and `inject` replaces globals with a module's
+exports:
+
+```ts
+await bundle({
+  esbuild, files, entry: "/src/index.ts",
+  modules: (spec) =>
+    spec.startsWith("node:")
+      ? `const m = globalThis.__host.get(${JSON.stringify(spec)}); export default m; export const { Buffer } = m;`
+      : undefined,
+  inject: ["/src/runtime-globals.ts"],
+});
+```
 
 ### `lowerAwait` for an AsyncLocalStorage polyfill
 
@@ -125,6 +145,15 @@ usually links one (`//# sourceMappingURL=index.js.map`): the bundler reads it fr
 tree, rewrites its sources to ids of that tree (`../src/index.ts` → `npm:pkg@1.0.0/src/index.ts`),
 fills a missing `sourcesContent` from the package's files, and inlines it. A map that is missing
 or broken is dropped: the file then maps to itself.
+
+### pnpm layouts
+
+In a pnpm install, `node_modules/x` is a symlink into `node_modules/.pnpm`, and `x`'s own
+dependencies sit next to its real directory there. Node follows the real path; a FilesApi sees
+only the link. When the usual walk up the `node_modules` folders finds nothing,
+`nodeModulesPackages` tries each ancestor's `node_modules/.pnpm/node_modules`, where pnpm links
+every installed package (with one version per name: a package that two dependencies need in
+different versions resolves to the hoisted one).
 
 ### What has no source
 

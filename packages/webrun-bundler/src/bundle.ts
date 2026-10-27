@@ -16,6 +16,10 @@ import type {
 
 /** esbuild's namespace for the files the bundler serves; its source-map names drop it. */
 const NS = "webrun";
+/** esbuild's namespace for the host's modules (`modules`): `virtual:<specifier>` in maps. */
+const VNS = "webrun-virtual";
+/** Marks an `inject` entry, so that it resolves like an import, not like the entry point. */
+const INJECT = "webrun-inject:";
 
 /** esbuild `supported` flags that lower `await` to generators. */
 const LOWER_AWAIT = { "async-await": false, "async-generator": false, "for-await": false };
@@ -48,7 +52,11 @@ const isExternal = (spec: string, patterns: ExternalPattern[]) =>
   );
 
 /** A source name of esbuild's map → the file id it stands for. */
-const sourceId = (s: string) => s.replace(/^(\.\.\/)*/, "").replace(new RegExp(`^${NS}:`), "");
+const sourceId = (s: string) =>
+  s
+    .replace(/^(\.\.\/)*/, "")
+    .replace(new RegExp(`^${VNS}:`), "virtual:")
+    .replace(new RegExp(`^${NS}:`), "");
 
 const toBase64 = (text: string) => {
   const bytes = new TextEncoder().encode(text);
@@ -91,6 +99,9 @@ export async function bundle(opts: BundleOptions): Promise<BundleResult> {
   const conditions = opts.conditions ?? ["browser"];
   const outfile = opts.outfile ?? "bundle.js";
   const mounts = new Map<string, Mount>([[project.prefix, project]]);
+  const supplied = opts.modules;
+  const virtualSource = (spec: string) =>
+    typeof supplied === "function" ? supplied(spec) : supplied?.[spec];
 
   /** The mount and path of a file id; the longest prefix wins (`npm:@a/b@1.0.0/…`). */
   const locate = (id: string) => {
@@ -107,24 +118,31 @@ export async function bundle(opts: BundleOptions): Promise<BundleResult> {
     name: "webrun-files",
     setup(b) {
       b.onResolve({ filter: /.*/ }, async (args) => {
-        if (args.kind === "entry-point") {
+        const injected = args.path.startsWith(INJECT);
+        const spec = injected ? args.path.slice(INJECT.length) : args.path;
+        if (args.kind === "entry-point" && !injected) {
           const path = joinWithin(root, root, args.path.replace(/^\/+/, ""));
           if (!path) return { errors: [{ text: `entry ${args.path} is outside the project` }] };
           return { path: idOf(project, path), namespace: NS };
         }
-        if (isExternal(args.path, external)) return { path: args.path, external: true };
-        const importer = locate(args.importer);
+        if (virtualSource(spec) !== undefined) return { path: spec, namespace: VNS };
+        if (isExternal(spec, external)) return { path: spec, external: true };
+        // The host's modules and `inject` entries import from the project's root.
+        const importer =
+          injected || args.namespace === VNS
+            ? { mount: project, path: `${root === "/" ? "" : root}/` }
+            : locate(args.importer);
         const require = args.kind === "require-call" || args.kind === "require-resolve";
         const failed = (why?: string) => ({
           errors: [
             {
-              text: `Could not resolve "${args.path}" (imported by ${args.importer})${why ? `: ${why}` : ""}`,
+              text: `Could not resolve "${spec}" (imported by ${args.importer || "inject"})${why ? `: ${why}` : ""}`,
             },
           ],
         });
         let r: Awaited<ReturnType<typeof resolveSpecifier>>;
         try {
-          r = await resolveSpecifier(args.path, importer, packages, {
+          r = await resolveSpecifier(spec, importer, packages, {
             conditions,
             require,
             browser,
@@ -136,6 +154,10 @@ export async function bundle(opts: BundleOptions): Promise<BundleResult> {
         mounts.set(r.mount.prefix, r.mount);
         return { path: idOf(r.mount, r.path), namespace: NS };
       });
+      b.onLoad({ filter: /.*/, namespace: VNS }, (args) => ({
+        contents: virtualSource(args.path) ?? "",
+        loader: "js",
+      }));
       b.onLoad({ filter: /.*/, namespace: NS }, async (args) => {
         const { mount, path } = locate(args.path);
         const loader = loaderFor(path);
@@ -173,6 +195,7 @@ export async function bundle(opts: BundleOptions): Promise<BundleResult> {
     define: opts.define,
     ...(opts.lowerAwait ? { supported: LOWER_AWAIT } : {}),
     ...rest,
+    ...(opts.inject?.length ? { inject: opts.inject.map((s) => INJECT + s) } : {}),
     sourcemap: "external",
     sourcesContent: true,
     plugins: [...extraPlugins, plugin],
