@@ -47,7 +47,7 @@
     "resolve.exports": "catalog:"
   },
   "peerDependencies": {
-    "esbuild-wasm": "catalog:"
+    "esbuild-wasm": "catalog:peers"
   },
   "devDependencies": {
     "@jridgewell/trace-mapping": "catalog:",
