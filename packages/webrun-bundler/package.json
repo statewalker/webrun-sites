@@ -1,0 +1,67 @@
+{
+  "name": "@statewalker/webrun-bundler",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "Transpiler, resolver and bundler on esbuild-wasm that reads everything through a FilesApi (MemFilesApi, OPFS, a FilesApi over a port; never node:fs) and fetches npm packages on demand. Every transformation keeps a source map: each line of a bundle traces back to the user's file or to the npm package's own source.",
+  "bugs": {
+    "url": "https://github.com/statewalker/webrun-sites/issues"
+  },
+  "homepage": "https://github.com/statewalker/webrun-sites/tree/main/packages/webrun-bundler#readme",
+  "author": {
+    "name": "Mikhail Kotelnikov",
+    "email": "mikhail.kotelnikov@gmail.com"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/statewalker/webrun-sites.git",
+    "directory": "packages/webrun-bundler"
+  },
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "prepack": "pnpm run build",
+    "dev": "tsdown --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "clean": "rimraf dist",
+    "lint": "biome check --write .",
+    "format": "biome format --write .",
+    "test:browser": "node e2e/browser.mjs"
+  },
+  "dependencies": {
+    "@statewalker/webrun-files": "catalog:",
+    "@statewalker/webrun-modules": "workspace:^",
+    "resolve.exports": "catalog:"
+  },
+  "peerDependencies": {
+    "esbuild-wasm": "catalog:"
+  },
+  "devDependencies": {
+    "@jridgewell/trace-mapping": "catalog:",
+    "@statewalker/webrun-files-browser": "catalog:",
+    "@statewalker/webrun-files-mem": "catalog:",
+    "esbuild-wasm": "catalog:",
+    "playwright": "catalog:",
+    "rimraf": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  }
+}
