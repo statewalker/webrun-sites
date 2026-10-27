@@ -49,8 +49,8 @@ catalogs:
       specifier: ^13.0.3
       version: 13.0.3
     '@statewalker/webrun-files':
-      specifier: ^0.10.0
-      version: 0.10.2
+      specifier: ^0.9.0 || ^0.10.0
+      version: 0.10.3
     '@statewalker/webrun-files-browser':
       specifier: ^0.10.2
       version: 0.10.2
@@ -61,8 +61,8 @@ catalogs:
       specifier: ^0.10.0
       version: 0.10.3
     '@statewalker/webrun-files-sqlite':
-      specifier: ^0.10.3
-      version: 0.10.3
+      specifier: ^0.11.0
+      version: 0.11.0
     '@statewalker/webrun-http-browser':
       specifier: ^0.6.0
       version: 0.6.4
@@ -316,7 +316,7 @@ importers:
     devDependencies:
       '@statewalker/webrun-files':
         specifier: 'catalog:'
-        version: 0.10.2
+        version: 0.10.3
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
@@ -350,7 +350,7 @@ importers:
     devDependencies:
       '@statewalker/webrun-files':
         specifier: 'catalog:'
-        version: 0.10.2
+        version: 0.10.3
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
@@ -381,7 +381,7 @@ importers:
     devDependencies:
       '@statewalker/webrun-files':
         specifier: 'catalog:'
-        version: 0.10.2
+        version: 0.10.3
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
@@ -396,7 +396,7 @@ importers:
         version: link:../webrun-dataflow
       '@statewalker/webrun-files':
         specifier: 'catalog:'
-        version: 0.10.2
+        version: 0.10.3
     devDependencies:
       '@statewalker/webrun-files-mem':
         specifier: 'catalog:'
@@ -418,7 +418,7 @@ importers:
     dependencies:
       '@statewalker/webrun-files':
         specifier: 'catalog:'
-        version: 0.10.2
+        version: 0.10.3
       '@statewalker/webrun-modules':
         specifier: workspace:^
         version: link:../webrun-modules
@@ -461,7 +461,7 @@ importers:
         version: link:../webrun-dataflow
       '@statewalker/webrun-files-sqlite':
         specifier: 'catalog:'
-        version: 0.10.3
+        version: 0.11.0
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -501,7 +501,7 @@ importers:
         version: 2.1.0
       '@statewalker/webrun-files':
         specifier: 'catalog:'
-        version: 0.10.2
+        version: 0.10.3
       '@statewalker/webrun-files-mem':
         specifier: 'catalog:'
         version: 0.10.3
@@ -568,7 +568,7 @@ importers:
         version: link:../webrun-dataflow
       '@statewalker/webrun-files':
         specifier: 'catalog:'
-        version: 0.10.2
+        version: 0.10.3
       '@statewalker/webrun-modules':
         specifier: workspace:^
         version: link:../webrun-modules
@@ -602,7 +602,7 @@ importers:
         version: 2.5.15
       '@statewalker/webrun-files':
         specifier: 'catalog:'
-        version: 0.10.2
+        version: 0.10.3
       '@statewalker/webrun-files-mem':
         specifier: 'catalog:'
         version: 0.10.3
@@ -639,7 +639,7 @@ importers:
         version: 2.5.15
       '@statewalker/webrun-files':
         specifier: 'catalog:'
-        version: 0.10.2
+        version: 0.10.3
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.4
@@ -660,7 +660,7 @@ importers:
     dependencies:
       '@statewalker/webrun-files':
         specifier: 'catalog:'
-        version: 0.10.2
+        version: 0.10.3
       '@statewalker/webrun-modules':
         specifier: workspace:^
         version: link:../webrun-modules
@@ -857,24 +857,28 @@ packages:
     engines: {node: '>=14.21.3'}
     cpu: [arm64]
     os: [linux]
+    libc: [musl]
 
   '@biomejs/cli-linux-arm64@2.5.15':
     resolution: {integrity: sha512-XaG7P7eeSLYETD3K9grfB0mQmpLQZjygdbsxekWBJAg4am79fGAtRpfRyNnTvXB2fZFNnJZG3nXm7HBat0+VUw==}
     engines: {node: '>=14.21.3'}
     cpu: [arm64]
     os: [linux]
+    libc: [glibc]
 
   '@biomejs/cli-linux-x64-musl@2.5.15':
     resolution: {integrity: sha512-IlxUcyxilVGPsE008x13pWdkTbU3nQpP2i9b5UrbOYj6goBkKsRX1XB7yJLcV+O1H9LBchIIm4adOaVLZBX0ZQ==}
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [linux]
+    libc: [musl]
 
   '@biomejs/cli-linux-x64@2.5.15':
     resolution: {integrity: sha512-xE4iEW/3LqlYj9GFgGrFsFSH51dEEpUbYWBfeOv0q87WkUDxK2o/HhreSb7qMJqck70RVM6Lg96hgedcAYcOkA==}
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
 
   '@biomejs/cli-win32-arm64@2.5.15':
     resolution: {integrity: sha512-2kPKzhNlm8C+Ru3GcO0Me2ODkCBLrVOUNuyi84RJyWDVKAA4+Kjj3jMjL938lF6BRfvltC4vB2nPY9SvN51Ovg==}
@@ -1296,21 +1300,25 @@ packages:
     resolution: {integrity: sha512-rR4yjwxpI1miLSrruLGcfR9yfw0Qebw+Twt+u+lKsL9SwmXxTm5pJhUAa9RU+c35oZ98IyAxGFjRwwq85BTbog==}
     cpu: [arm64]
     os: [linux]
+    libc: [glibc]
 
   '@node-datachannel/linux-arm64-musl@0.33.4':
     resolution: {integrity: sha512-MR4o1F0aREj/AtbNlXL20YiNx8/pDI8L/5B4Vr9ldiEDottD0IOdCd0khB8fpr5Np2CW7WwU9QG+uto00QGVdw==}
     cpu: [arm64]
     os: [linux]
+    libc: [musl]
 
   '@node-datachannel/linux-x64-gnu@0.33.4':
     resolution: {integrity: sha512-xN0x3lcQ87qwOAmf1dBLVWrYY40LQ7pM4Y9wuNjP+EtN4IwiXqrhPdgupzGAElxna+n2NgBG0gT60dZpgoYU2Q==}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
 
   '@node-datachannel/linux-x64-musl@0.33.4':
     resolution: {integrity: sha512-FWqJEjL7TqOPmsqdfwmG/BUwOXQN7MfpEU8kzw6ePbglUbwgdc3976Ls9BCBUXyPgEJyLo8YE1LJyWAlbXWyvA==}
     cpu: [x64]
     os: [linux]
+    libc: [musl]
 
   '@node-datachannel/win32-arm64-msvc@0.33.4':
     resolution: {integrity: sha512-TeDV2tSPm+qAnF6MIPlLFTIlobSYLwOVe3/wQl+8hD/q3cEPTQi7vByFaQQ5lRULKKdnjKRR5iDMsxMilqbtXA==}
@@ -1488,36 +1496,42 @@ packages:
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [arm64]
     os: [linux]
+    libc: [glibc]
 
   '@rolldown/binding-linux-arm64-musl@1.2.12':
     resolution: {integrity: sha512-5YK1I9SqDkbPgc1IA8BgDl34suqUS2q0KWnBrirm0E51YjOs6eo6dV6jbQfNE/argHRSvd0QUGgtpIoYx+WWpw==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [arm64]
     os: [linux]
+    libc: [musl]
 
   '@rolldown/binding-linux-ppc64-gnu@1.2.12':
     resolution: {integrity: sha512-Rkcrmp7eFRg74yL5fXEU91JEWbdEPLevWwGtXpmhbjlD1StScbWTmO94Bhly+Mo+ketKYkdmM1vNUKeWSlx8cQ==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [ppc64]
     os: [linux]
+    libc: [glibc]
 
   '@rolldown/binding-linux-s390x-gnu@1.2.12':
     resolution: {integrity: sha512-qvK4DuAsQc2BSjlx+Xr+IzOIvvxbGZqxFwdWfG6F518Erj0GGISyQbJ6pIappnOxlNPzNHvo/L0BwB30GZ+zVw==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [s390x]
     os: [linux]
+    libc: [glibc]
 
   '@rolldown/binding-linux-x64-gnu@1.2.12':
     resolution: {integrity: sha512-Q9uLBO53Xd4QIq1WOycVQyPP1O4HhraEV2qqb3uTrnVw6QZih9duY4vNXOivL1xoUS1/z+W8eF4NMfl2a8Sdjw==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
 
   '@rolldown/binding-linux-x64-musl@1.2.12':
     resolution: {integrity: sha512-3IBxWFMjbOZskDPKv8Lf9BCnahlKuHthWkYnyIxOH/QcJrFcS4EmcenthApkwr/5+nEqZlLzeYbxeMaX7A5u4g==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [x64]
     os: [linux]
+    libc: [musl]
 
   '@rolldown/binding-openharmony-arm64@1.2.12':
     resolution: {integrity: sha512-xtX61xg4LKPkPWilZU1ynKClz5Gj4bf74LML4r3eVLWumKnGjoEr1OSHQhMdbBDoYTi+yjrujvpZe2pUnqCrrA==}
@@ -1547,6 +1561,12 @@ packages:
     resolution: {integrity: sha512-KV321z5m/0nuAg83W1dPLy85HpHDk7Sdi4fJbwvacWsEhAh+rZUW4ZfGcXmUIvjZg4ss2bcwNlRhJ7GBEUG08w==}
     engines: {node: ^12.20.0 || ^14.13.1 || >=16.0.0}
 
+  '@statewalker/db-api@0.1.4':
+    resolution: {integrity: sha512-XqyQRE1CvJ8Ijv99u0eW8l/syARfuzhL3BGIFYC1375/KlvDJx+o4D4LNnMqCh97ScU/hERQaaJ0MeXYAngmvA==}
+
+  '@statewalker/db-sqlite@0.1.0':
+    resolution: {integrity: sha512-LoVQS/KsuKwbJjXkbrYty2cuqmACFvdhmlQYtfQ8yuBiXSAX8yfKxdDWNcJYqcBJQk6Za7Mg+HU42Oh8jCL9eg==}
+
   '@statewalker/webrun-files-browser@0.10.2':
     resolution: {integrity: sha512-2Fq90Q2YYPcWpvmJed6vc81OmxcqpDXITO0V1ntFEN2UMimeiebwFnMBUbgwac1m/rQoPTMNdN0ME1wcJcEKrA==}
 
@@ -1556,11 +1576,11 @@ packages:
   '@statewalker/webrun-files-node@0.10.3':
     resolution: {integrity: sha512-h74IPpnC1VSh+YJhQO3KQbQ1HFS5ygwIiuMOqiwimUITeljlNrWjaUAksPhHyXRK9M/ZKUk+XBxmDWZndcQRhw==}
 
-  '@statewalker/webrun-files-sqlite@0.10.3':
-    resolution: {integrity: sha512-YdKf4j0yPVnWjNtGjmrfJBvk2dWG6ydHNXKMDdzZywMVQPvxhO3ummKqsCzFC4OAUmD+L/S8zUFFYn6rMSwFqw==}
+  '@statewalker/webrun-files-sqlite@0.11.0':
+    resolution: {integrity: sha512-j3lbImRrxfF88CJene1JJiZcMIJJqoagM5B4qLhRVa7eoYSybRY0h2w5bcr5avOVnv5oHqU1HZi9aXD4ri77Wg==}
 
-  '@statewalker/webrun-files@0.10.2':
-    resolution: {integrity: sha512-hqsaY8BwRqvV7f6v6n82iIFEfaFZTLHrBk03o8pwfOPYMXMvtAdk9RYT/pDwp9cWubmePylc0Xpyuh+JC4hVtw==}
+  '@statewalker/webrun-files@0.10.3':
+    resolution: {integrity: sha512-YALXiT2lyPhV2dq7kNVjcy3fUw8AAMyKub+9PdJ0T+5jnTD9RcRudy266Aqb18Nw/T2Up5B/eG4hEFnFQR3p8A==}
 
   '@statewalker/webrun-http-browser@0.6.4':
     resolution: {integrity: sha512-hxGJcsxq++zQ2VY3k/JpkwIaWyiqDCmaQMd41klSXoClxwtf7sznPyK7SQXgivXkKBHa/9vIvnFfGqoBV1ekqg==}
@@ -1831,36 +1851,42 @@ packages:
     resolution: {integrity: sha512-xJDpYAsKV5+eaiBhTYl05fvT6sst4PsCeuIFMRu9b0/WCSrNQPfCDtAQ5/MS6xNpsdujdZEPR+gmfWk3ZG5i3A==}
     cpu: [arm]
     os: [linux]
+    libc: [glibc]
     deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-linux-arm-musl@0.10.2':
     resolution: {integrity: sha512-qfTkgd7AEx61l4K9VtXWCGTxc/fmXJ4ZheDz3i+/AAJUtg4sa0bPrc0VBxPggB/rayR8Z3+JfrBItuyanBJJ9Q==}
     cpu: [arm]
     os: [linux]
+    libc: [musl]
     deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-linux-arm64-gnu@0.10.2':
     resolution: {integrity: sha512-4e6Mifm/4UdjtU3D8mATIrvgP+xEiH8xtQOjd0zpd72XKWT7ug3sdyhq2utkkZFP6BvYp7SgZrI+aR4VeIOHdw==}
     cpu: [arm64]
     os: [linux]
+    libc: [glibc]
     deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-linux-arm64-musl@0.10.2':
     resolution: {integrity: sha512-RdsJrUfDYFVV3JOmWFUWwSu31fa1APn12xDeIKxgl/YWxrabwtxsDBNjF2561c7tmcbiewdCUvngqRs8AyGVLA==}
     cpu: [arm64]
     os: [linux]
+    libc: [musl]
     deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-linux-x64-gnu@0.10.2':
     resolution: {integrity: sha512-mVzWimEPPreaPyXIUvxsHoJzvO7ckZ5j0LgQFHz04zQIRwt9A9T2hA7K5/jYjJKkMxWG/U2VjhGNwVhtyU+uqg==}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
     deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-linux-x64-musl@0.10.2':
     resolution: {integrity: sha512-Y77fyISurmr2mvO1yeq3u+x/WJbACgPR4w+lzEVx30ViCxZzIGrZPRN1yEdZ9xUNPNsIO5thBHIdRNG+UGUG+Q==}
     cpu: [x64]
     os: [linux]
+    libc: [musl]
     deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-win32-arm64@0.10.2':
@@ -1903,36 +1929,42 @@ packages:
     resolution: {integrity: sha512-q/XPPQQAPdlw05aPj30ygBhekmQryGOwxVraBgApjKK8yY1kNQgqq6XCYLF1WHSee+lhxclrTO7W0/bt7dR1GA==}
     cpu: [arm]
     os: [linux]
+    libc: [glibc]
     deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-parser/binding-linux-arm-musl@0.10.2':
     resolution: {integrity: sha512-A+Cb0I1hFF4wilTQpWs79k1aNnj4B2tkrHx3zsuUNF9BtVY2zPZ4yeQEM/zjXrS/qJlNMZVK9NrWJjwdpnTrfg==}
     cpu: [arm]
     os: [linux]
+    libc: [musl]
     deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-parser/binding-linux-arm64-gnu@0.10.2':
     resolution: {integrity: sha512-aGNSzqIqqphFwAdIFwVvKIyXD1Iy3CxrEJVIZAT87Ecyi4vCmmDD2v2l9h+Gd3/wSy3JZlOI792LJbKAjyy9rQ==}
     cpu: [arm64]
     os: [linux]
+    libc: [glibc]
     deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-parser/binding-linux-arm64-musl@0.10.2':
     resolution: {integrity: sha512-Ddl1sF0rtuCXyHGSOV6dcmdx+ETv1iD+IVFqQuOjzkJZWclxJxdBWX6ZJMRtTiGqGUTbqLEKiTXxpR/Bvqk+2A==}
     cpu: [arm64]
     os: [linux]
+    libc: [musl]
     deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-parser/binding-linux-x64-gnu@0.10.2':
     resolution: {integrity: sha512-/nlcpR6IF5U+0m5L9wvAIXeQa2DT+BXuvqKDsTcOTlcc0B4dHNyqE5hTXsS4hAyimpy2ZK8A1zMNF5hTrjg2cg==}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
     deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-parser/binding-linux-x64-musl@0.10.2':
     resolution: {integrity: sha512-GX80dxTQD/M/OryyuxJcFzFENzry3cDFPvCFTyWogNWQH3fSHfMrNfpwpl1YzMos1eV9NygK5GSDG7VArQlb4w==}
     cpu: [x64]
     os: [linux]
+    libc: [musl]
     deprecated: yuku-parser runs on yuku-core since 0.14
 
   '@yuku-parser/binding-win32-arm64@0.10.2':
@@ -2623,24 +2655,28 @@ packages:
     engines: {node: '>= 12.0.0'}
     cpu: [arm64]
     os: [linux]
+    libc: [glibc]
 
   lightningcss-linux-arm64-musl@1.33.0:
     resolution: {integrity: sha512-yiO5ROMuYQgXbC60yjZU5CYSFZGKXL0HFATXt9mHJn1+zW55oCtMI9NfcVhYLMFDL7gV7oBPon/EmMMGg2OvtQ==}
     engines: {node: '>= 12.0.0'}
     cpu: [arm64]
     os: [linux]
+    libc: [musl]
 
   lightningcss-linux-x64-gnu@1.33.0:
     resolution: {integrity: sha512-ar+Ju7LmcN0Jo4FpL4hpFybwNG9/3A/Br5KW2n2jyODg3MEZXaDYADdemoNS+BDNfMgKvylJLj4S5tyRActuAg==}
     engines: {node: '>= 12.0.0'}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
 
   lightningcss-linux-x64-musl@1.33.0:
     resolution: {integrity: sha512-RYiYbkokw0trfKqqzfF55lginwEPrD3OJDfTuJzFs1MK6iFnDenaz1fqLLtX4ITG3OktJQXOeTaw1awrBAlZPw==}
     engines: {node: '>= 12.0.0'}
     cpu: [x64]
     os: [linux]
+    libc: [musl]
 
   lightningcss-wasm@1.33.0:
     resolution: {integrity: sha512-OLAtqEyInBSVWjPrTjpLzcZUMUHO0q+2PFBXKr86nxZOu0P38givj/ZMtRaZ0d38pMTb9wQx+LtaLtHclv+sEA==}
@@ -4660,23 +4696,31 @@ snapshots:
 
   '@sindresorhus/fnv1a@3.1.0': {}
 
+  '@statewalker/db-api@0.1.4': {}
+
+  '@statewalker/db-sqlite@0.1.0':
+    dependencies:
+      '@statewalker/db-api': 0.1.4
+
   '@statewalker/webrun-files-browser@0.10.2':
     dependencies:
-      '@statewalker/webrun-files': 0.10.2
+      '@statewalker/webrun-files': 0.10.3
 
   '@statewalker/webrun-files-mem@0.10.3':
     dependencies:
-      '@statewalker/webrun-files': 0.10.2
+      '@statewalker/webrun-files': 0.10.3
 
   '@statewalker/webrun-files-node@0.10.3':
     dependencies:
-      '@statewalker/webrun-files': 0.10.2
+      '@statewalker/webrun-files': 0.10.3
 
-  '@statewalker/webrun-files-sqlite@0.10.3':
+  '@statewalker/webrun-files-sqlite@0.11.0':
     dependencies:
-      '@statewalker/webrun-files': 0.10.2
+      '@statewalker/db-api': 0.1.4
+      '@statewalker/db-sqlite': 0.1.0
+      '@statewalker/webrun-files': 0.10.3
 
-  '@statewalker/webrun-files@0.10.2': {}
+  '@statewalker/webrun-files@0.10.3': {}
 
   '@statewalker/webrun-http-browser@0.6.4':
     dependencies:
