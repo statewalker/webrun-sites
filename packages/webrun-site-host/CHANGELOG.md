@@ -1,5 +1,13 @@
 # @statewalker/webrun-site-host
 
+## 0.3.0
+
+### Minor Changes
+
+- Release of the changes since the last published version:
+  
+  - @statewalker/webrun-http-browser ^0.6.0 -> ^0.7.0
+
 ## 0.2.5
 
 ### Patch Changes
