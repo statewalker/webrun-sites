@@ -246,6 +246,30 @@ describe("bundle", () => {
     );
   });
 
+  it("gives files in a \"type\": \"module\" scope Node's CommonJS interop (tslib's modules/)", async () => {
+    // tslib 2.3: exports "import" -> modules/index.js (modules/package.json: type module), which
+    // does `import tslib from "../tslib.js"` of a CommonJS file that sets __esModule. In Node
+    // (and Vite, which pre-bundles from disk) the default import is module.exports.
+    const files = await filesOf({
+      "/src/main.js": 'import { __extends } from "tslib";\nexport const out = typeof __extends;\n',
+      "/node_modules/tslib/package.json": JSON.stringify({
+        name: "tslib",
+        version: "2.3.0",
+        main: "tslib.js",
+        exports: { ".": { import: "./modules/index.js", module: "./tslib.es6.js", default: "./tslib.js" } },
+      }),
+      "/node_modules/tslib/modules/package.json": JSON.stringify({ type: "module" }),
+      "/node_modules/tslib/modules/index.js":
+        'import tslib from "../tslib.js";\nconst { __extends } = tslib;\nexport { __extends };\n',
+      "/node_modules/tslib/tslib.js":
+        'Object.defineProperty(exports, "__esModule", { value: true });\nexports.__extends = function () {};\n',
+      "/node_modules/tslib/tslib.es6.js": "export function __extends() {}\n",
+    });
+    const r = await bundle({ esbuild, files, entry: "/src/main.js", conditions: ["browser", "import"] });
+    expect((await run(r.code)).out).toBe("function");
+    expect(r.map.sources).toContain("npm:tslib@2.3.0/modules/index.js");
+  });
+
   it("keeps externals as imports, picks exports conditions, resolves .js to .ts and #imports", async () => {
     const files = await filesOf({
       "/package.json": JSON.stringify({ imports: { "#util": "./src/util.ts" } }),
