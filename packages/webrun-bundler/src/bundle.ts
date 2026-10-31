@@ -230,14 +230,22 @@ export async function bundle(opts: BundleOptions): Promise<BundleResult> {
     ...(opts.lowerAwait ? { supported: LOWER_AWAIT } : {}),
     ...rest,
     ...(opts.inject?.length ? { inject: opts.inject.map((s) => INJECT + s) } : {}),
-    sourcemap: "external",
-    sourcesContent: true,
+    // `sourcemap: false`: no map at all (a large bundle's map, with every source's content,
+    // can take more memory than the bundle).
+    sourcemap: opts.sourcemap === false ? false : "external",
+    sourcesContent: opts.sourcemap !== false,
     plugins: [...extraPlugins, plugin],
   });
   const out = result.outputFiles ?? [];
   const jsFile = out.find((f) => !f.path.endsWith(".map"));
   const mapFile = out.find((f) => f.path.endsWith(".map"));
-  if (!jsFile || !mapFile) throw new Error("webrun-bundler: esbuild produced no output");
+  if (!jsFile) throw new Error("webrun-bundler: esbuild produced no output");
+  if (!mapFile)
+    return {
+      code: jsFile.text,
+      map: { version: 3, sources: [], names: [], mappings: "" } as unknown as SourceMap,
+      metafile: result.metafile as BundleResult["metafile"],
+    } as BundleResult;
   const raw = JSON.parse(mapFile.text) as SourceMap;
   const map: SourceMap = {
     ...raw,
@@ -246,7 +254,7 @@ export async function bundle(opts: BundleOptions): Promise<BundleResult> {
   };
   delete map.sourceRoot;
   return {
-    code: linkMap(jsFile.text, map, opts.sourcemap ?? "external", outfile),
+    code: linkMap(jsFile.text, map, opts.sourcemap || "external", outfile),
     map,
     metafile: result.metafile as BundleResult["metafile"],
     warnings: result.warnings,
