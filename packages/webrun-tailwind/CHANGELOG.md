@@ -1,5 +1,13 @@
 # @statewalker/webrun-tailwind
 
+## 0.2.4
+
+### Patch Changes
+
+- Release of the changes since the last published version:
+  
+  - files changed: src/index.test.ts
+
 ## 0.2.3
 
 ### Patch Changes

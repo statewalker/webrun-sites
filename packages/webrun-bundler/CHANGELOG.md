@@ -1,5 +1,13 @@
 # @statewalker/webrun-bundler
 
+## 0.1.2
+
+### Patch Changes
+
+- Release of the changes since the last published version:
+  
+  - files changed: src/bundle.test.ts
+
 ## 0.1.1
 
 ### Patch Changes
