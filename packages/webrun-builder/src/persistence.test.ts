@@ -43,7 +43,15 @@ describe("configurable persistence", () => {
       await e1.run({ maxTasks: 2 });
       const log: string[] = [];
       const e2 = await createBuildEngine({
-        cells: [{ ...upper, run: (ctx) => (log.push(ctx.key), upper.run(ctx)) }],
+        cells: [
+          {
+            ...upper,
+            run: (ctx) => {
+              log.push(ctx.key);
+              return upper.run(ctx);
+            },
+          },
+        ],
         persistence: cfg(),
       });
       await e2.run();
