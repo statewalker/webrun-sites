@@ -150,6 +150,8 @@ export async function openDocumentIndex(opts: DocumentIndexOptions): Promise<Doc
   const idx = index;
   /** Whether the index changed since the last flush (an index task ran or disposed). */
   let touched = false;
+  /** An `update()` is in progress: its run may commit index changes after any flush. */
+  let updating = 0;
 
   const cells: CellDef[] = [
     {
@@ -269,17 +271,24 @@ export async function openDocumentIndex(opts: DocumentIndexOptions): Promise<Doc
       });
       // Mark the index dirty while engine commits may run ahead of its flush.
       await engine.put(SYS, "index-dirty", true);
-      const stats = await engine.run();
-      if (opts.crashBeforeIndexFlush) throw new Error("simulated crash before the index flush");
-      if (opts.autoFlush ?? true) await flushIndex();
-      // Clean once nothing is left unsaved (with autoFlush: false, after flush()).
-      if (!touched) await engine.remove(SYS, "index-dirty");
-      return { scanned, executed: stats.executed, failed: stats.failed };
+      updating++;
+      try {
+        const stats = await engine.run();
+        if (opts.crashBeforeIndexFlush) throw new Error("simulated crash before the index flush");
+        if (opts.autoFlush ?? true) await flushIndex();
+        // Clean once nothing is left unsaved (with autoFlush: false, after flush()).
+        if (!touched) await engine.remove(SYS, "index-dirty");
+        return { scanned, executed: stats.executed, failed: stats.failed };
+      } finally {
+        updating--;
+      }
     },
 
     async flush() {
       await flushIndex();
-      await engine.remove(SYS, "index-dirty");
+      // During an update the run may still commit index changes after this
+      // save: the marker stays until that update ends clean.
+      if (updating === 0) await engine.remove(SYS, "index-dirty");
     },
 
     async search(query, { topK = 10, mode = "hybrid" } = {}) {

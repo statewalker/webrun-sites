@@ -79,40 +79,66 @@ export class SqlKV implements KV {
     await this.#init();
     this.metrics.commits++;
     const t = this.table;
-    const statements = writes.map(({ key, value, ifValue }) => {
+    const statements = writes.map(({ key, value, ifValue, guard }) => {
+      // The guard is one more condition on the same statement.
+      const g = guard ? ` AND EXISTS (SELECT 1 FROM ${t} WHERE key = ? AND value = ?)` : "";
+      const gp = guard ? [guard.key, guard.value] : [];
       if (value === undefined) {
         this.metrics.rowsDeleted++;
-        if (ifValue === undefined) return { sql: `DELETE FROM ${t} WHERE key = ?`, params: [key] };
-        if (ifValue === null) return { sql: "SELECT 1 WHERE 0", params: [] }; // absent already
-        return { sql: `DELETE FROM ${t} WHERE key = ? AND value = ?`, params: [key, ifValue] };
+        if (ifValue === null) {
+          // "Delete if absent": a no-op that applies iff the key is absent (and the guard holds).
+          const notGuard = guard
+            ? ` OR NOT EXISTS (SELECT 1 FROM ${t} WHERE key = ? AND value = ?)`
+            : "";
+          return {
+            sql: `UPDATE ${t} SET value = value WHERE key = ?${notGuard}`,
+            params: [key, ...gp],
+          };
+        }
+        if (ifValue === undefined) {
+          return { sql: `DELETE FROM ${t} WHERE key = ?${g}`, params: [key, ...gp] };
+        }
+        return {
+          sql: `DELETE FROM ${t} WHERE key = ? AND value = ?${g}`,
+          params: [key, ifValue, ...gp],
+        };
       }
       this.metrics.rowsWritten++;
       this.metrics.bytesWritten += key.length + value.length;
       if (ifValue === undefined) {
-        return {
-          sql: `INSERT INTO ${t} (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
-          params: [key, value],
-        };
+        return guard
+          ? {
+              sql: `INSERT INTO ${t} (key, value) SELECT ?, ? WHERE EXISTS (SELECT 1 FROM ${t} WHERE key = ? AND value = ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
+              params: [key, value, ...gp],
+            }
+          : {
+              sql: `INSERT INTO ${t} (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
+              params: [key, value],
+            };
       }
       if (ifValue === null) {
-        return {
-          sql: `INSERT INTO ${t} (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING`,
-          params: [key, value],
-        };
+        return guard
+          ? {
+              sql: `INSERT INTO ${t} (key, value) SELECT ?, ? WHERE EXISTS (SELECT 1 FROM ${t} WHERE key = ? AND value = ?) ON CONFLICT (key) DO NOTHING`,
+              params: [key, value, ...gp],
+            }
+          : {
+              sql: `INSERT INTO ${t} (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING`,
+              params: [key, value],
+            };
       }
       return {
-        sql: `UPDATE ${t} SET value = ? WHERE key = ? AND value = ?`,
-        params: [value, key, ifValue],
+        sql: `UPDATE ${t} SET value = ? WHERE key = ? AND value = ?${g}`,
+        params: [value, key, ifValue, ...gp],
       };
     });
     if (statements.length === 0) return [];
     const counts = await this.db.transaction(statements);
-    // Unconditional writes always apply; a delete-if-absent "applies" as a no-op.
-    return writes.map((w, i) =>
-      w.ifValue === undefined || (w.ifValue === null && w.value === undefined)
-        ? true
-        : (counts[i] ?? 0) > 0,
-    );
+    return writes.map((w, i) => {
+      const n = counts[i] ?? 0;
+      if (w.value === undefined && w.ifValue === null) return n === 0;
+      return w.ifValue === undefined && !w.guard ? true : n > 0;
+    });
   }
 
   resetMetrics(): void {

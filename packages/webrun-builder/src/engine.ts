@@ -17,9 +17,10 @@
  *   tasks (a cell never reads its own outputs, so they are independent),
  *   executes them, and commits the batch atomically. A task never runs while a
  *   more upstream cell has queued work: a diamond's join runs once.
- * - **Verify before execute.** A task's trace keeps a hash of every row it
- *   read. A queued map task whose reads all hash as before (a change undone
- *   before the run: remove + put back) is dequeued without running.
+ * - **Verify before execute.** A map task's trace keeps a fingerprint of every
+ *   row it read. A queued map task whose reads all match (a change undone
+ *   before the run: remove + put back) is dequeued without running. Tasks that
+ *   listed a signal always run; `invalidate`/`requeue` drop the fingerprints.
  * - **A commit** holds, per task: changed outputs plus the dependents they
  *   queue, retractions of outputs no longer emitted, the trace (reads with
  *   hashes, outputs, state) and reverse-index diff, the dequeue and the
@@ -32,13 +33,14 @@
  *   they are unchanged before committing; a write landing in between finds the
  *   registration and re-queues it.
  * - **Several engines may share a store** (`shared: true`) whose writes support
- *   conditions: claims are then leases (owner + expiry) taken with conditional
- *   writes, so a task runs in one engine at a time and a crashed engine's
- *   claims expire. Alone on a store, an engine claims without writing.
+ *   conditions: claims are leases (owner + expiry) taken with conditional
+ *   writes, and every write of a task's commit is guarded by its claim, so the
+ *   result of an engine whose claim went stale is dropped as a whole. Alone on
+ *   a store, an engine claims without writing.
  *
  * KV layout (tuples joined with U+0001):
  *   r/<signal>/<key>                → <owner>\x02<canonical json>  (owner "" = source)
- *   q/<rank>/<cell>/<task>          → {"g": token, "a": attempts, "o"?: owner, "u"?: lease end, "z"?: 1 reset}
+ *   q/<rank>/<cell>/<task>          → {"g": token, "a": attempts, "o"?: owner, "u"?: lease end}
  *   f/<cell>/<task>                 → {"r": reads, "l": lists, "o": outputs, "i"/"rh": read fingerprints, "s"?: state}
  *   x/<signal>/<key>/<cell>/<task>  → ""
  *   xl/<signal>/<cell>/<task>       → ""
@@ -46,7 +48,7 @@
  *   d/<cell>/<task>                 → {"attempts": n, "error": text}
  */
 import { canonicalJson } from "./canonical-json.js";
-import { k, kp, seqKey, split } from "./keys.js";
+import { assertName, k, kp, SEP, seqKey, split } from "./keys.js";
 import { type Logger, NULL_LOGGER } from "./logger.js";
 import type { KV, KvWrite } from "./store/kv.js";
 import { Topology } from "./topology.js";
@@ -80,7 +82,6 @@ interface QueueRow {
   a: number;
   o?: string;
   u?: number;
-  z?: 1;
 }
 interface Claim {
   cell: string;
@@ -154,6 +155,12 @@ export class BuildEngine {
       if (!c.incremental) continue;
       if (c.kind !== "reduce")
         throw new Error(`Cell "${c.id}": only reduce cells can be incremental`);
+      if (this.#shared) {
+        // Its change records are consumed with a read-check-commit that only one engine can fence.
+        throw new Error(
+          `Cell "${c.id}": incremental reduce cells are not supported with shared: true`,
+        );
+      }
       for (const s of c.inputs) this.#folders.set(s, [...(this.#folders.get(s) ?? []), c.id]);
     }
   }
@@ -163,6 +170,7 @@ export class BuildEngine {
   /** Write a source row. A value equal to the stored one changes nothing. */
   async put(signal: string, key: string, value: Json): Promise<boolean> {
     this.#topo.assertSource(signal);
+    assertName("Row key", key);
     const json = canonicalJson(value);
     return this.#locked(async () => {
       const stored = await this.#row(signal, key);
@@ -179,6 +187,7 @@ export class BuildEngine {
   /** Remove a source row; everything derived from it is retracted by the next run. */
   async remove(signal: string, key: string): Promise<boolean> {
     this.#topo.assertSource(signal);
+    assertName("Row key", key);
     return this.#locked(async () => {
       const stored = await this.#row(signal, key);
       if (stored === undefined) return false;
@@ -223,38 +232,50 @@ export class BuildEngine {
     return out;
   }
 
-  /** Put a dead-lettered task back in the queue with a fresh attempt count. */
+  /**
+   * Put a dead-lettered task back in the queue with a fresh attempt count. It
+   * runs even if its inputs are unchanged (its code may have been fixed).
+   */
   async requeue(cell: string, key: string): Promise<void> {
     this.#topo.cell(cell);
-    await this.#locked(() =>
-      this.#kv.commit([
-        { key: k("d", cell, key) },
-        { key: this.#qkey(cell, key), value: this.#qrow() },
-      ]),
-    );
+    const writes = new Map<string, KvWrite>();
+    await this.#forget(cell, key, writes);
+    set(writes, k("d", cell, key), undefined);
+    set(writes, this.#qkey(cell, key), this.#qrow());
+    await this.#locked(() => this.#kv.commit([...writes.values()]));
   }
 
   /**
-   * Queue every task of `cell` — e.g. after its code changed. Downstream tasks
-   * re-run only where its outputs actually change. An incremental reduce
-   * starts again from an empty state.
+   * Queue every task of `cell` — e.g. after its code changed. They run even if
+   * their inputs are unchanged; downstream tasks re-run only where the outputs
+   * actually change. An incremental reduce starts again from an empty state.
    */
   async invalidate(cell: string): Promise<void> {
     const def = this.#topo.cell(cell);
     const writes = new Map<string, KvWrite>();
-    // `z`: skip verification (the code changed, not the inputs) and reset state.
-    const row = () => JSON.stringify({ g: this.#token(), a: 0, z: 1 } satisfies QueueRow);
-    if (def.kind === "reduce") {
-      set(writes, this.#qkey(cell, "*"), row());
-    } else {
-      for (const s of def.inputs) {
-        for (const key of await this.keys(s)) set(writes, this.#qkey(cell, key), row());
-      }
-      for await (const [fkey] of this.#kv.scan(kp("f", cell))) {
-        set(writes, this.#qkey(cell, split(fkey)[2] as string), row());
-      }
+    const tasks = new Set<string>();
+    if (def.kind === "reduce") tasks.add("*");
+    else {
+      for (const s of def.inputs) for (const key of await this.keys(s)) tasks.add(key);
+      for await (const [fkey] of this.#kv.scan(kp("f", cell))) tasks.add(split(fkey)[2] as string);
+    }
+    for (const task of tasks) {
+      await this.#forget(cell, task, writes);
+      set(writes, this.#qkey(cell, task), this.#qrow());
     }
     if (writes.size > 0) await this.#locked(() => this.#kv.commit([...writes.values()]));
+  }
+
+  /**
+   * Drop what lets a task skip or resume: its read fingerprints and its
+   * incremental state. Kept in the trace (not the queue row), so a later
+   * re-queue by a write cannot undo it; the next successful run rewrites them.
+   */
+  async #forget(cell: string, task: string, writes: Map<string, KvWrite>): Promise<void> {
+    const raw = await this.#kv.get(k("f", cell, task));
+    if (raw === undefined) return;
+    const { i: _i, rh: _rh, s: _s, ...rest } = JSON.parse(raw) as Trace;
+    set(writes, k("f", cell, task), JSON.stringify(rest));
   }
 
   async status(): Promise<BuildStatus> {
@@ -329,10 +350,22 @@ export class BuildEngine {
     const now = this.#now();
     const candidates: { cell: string; task: string; qkey: string; raw: string; row: QueueRow }[] =
       [];
+    // Rows of cells no longer in the graph are dropped; rows queued under an old
+    // rank (the cell set changed) move to the current one, keeping upstream-first.
+    const fixes: KvWrite[] = [];
     let cell: string | undefined;
     let leasedByOthers = false;
     for await (const [qkey, raw] of this.#kv.scan(kp("q"))) {
       const [, , c, task] = split(qkey) as [string, string, string, string];
+      if (!this.#topo.cells.has(c)) {
+        fixes.push({ key: qkey, ifValue: raw });
+        continue;
+      }
+      const current = this.#qkey(c, task);
+      if (current !== qkey) {
+        fixes.push({ key: current, value: raw, ifValue: null }, { key: qkey, ifValue: raw });
+        continue;
+      }
       if (cell === undefined) cell = c;
       else if (c !== cell) break;
       const row = JSON.parse(raw) as QueueRow;
@@ -342,6 +375,10 @@ export class BuildEngine {
       }
       candidates.push({ cell: c, task, qkey, raw, row });
       if (candidates.length >= limit) break;
+    }
+    if (fixes.length > 0) {
+      await this.#locked(() => this.#kv.commit(fixes));
+      return this.#claimBatch(limit);
     }
     if (candidates.length === 0) return { claims: [], blocked: leasedByOthers };
     // Alone on the store: no lease to take; the dequeue stays conditional.
@@ -400,10 +437,16 @@ export class BuildEngine {
       set(writes, this.#qkey(id, cell.kind === "reduce" ? "*" : key), this.#qrow());
     }
     for (const id of this.#folders.get(signal) ?? []) {
-      // Keep the value at the reducer's last run: only the first change records it.
+      // Keep the value at the reducer's last run (the first change's previous
+      // value) and refresh the token on every change, so a change landing while
+      // the reducer runs is seen as new.
       const ckey = k("c", id, signal, key);
-      if (writes.has(ckey) || (await this.#kv.get(ckey)) !== undefined) continue;
-      set(writes, ckey, JSON.stringify({ p: previous ?? null, g: this.#token() }));
+      const existing = writes.get(ckey)?.value ?? (await this.#kv.get(ckey));
+      const p =
+        existing === undefined
+          ? (previous ?? null)
+          : (JSON.parse(existing) as { p: string | null }).p;
+      set(writes, ckey, JSON.stringify({ p, g: this.#token() }));
     }
     for await (const [xkey] of this.#kv.scan(kp("x", signal, key))) {
       const [, , , cell, task] = split(xkey) as [string, string, string, string, string];
@@ -422,7 +465,6 @@ export class BuildEngine {
     const cell = this.#topo.cell(claim.cell);
     const rawPrev = await this.#kv.get(k("f", claim.cell, claim.task));
     const prev: Trace = rawPrev ? (JSON.parse(rawPrev) as Trace) : EMPTY_TRACE;
-    const reset = claim.row.z === 1;
     /** Rows fetched for this task (verification and `ctx.get` share them). */
     const cache = new Map<string, StoredRow | undefined>();
     const fetch = async (signal: string, key: string) => {
@@ -442,11 +484,11 @@ export class BuildEngine {
           );
           return this.#done(claim, prev, rawPrev, undefined, new Map(), new Map(), [], []);
         }
-        if (!reset && prev.i && prev.rh && (await this.#unchanged(cell, claim.task, prev, fetch))) {
+        if (prev.i && prev.rh && (await this.#unchanged(cell, claim.task, prev, fetch))) {
           return { claim, kind: "skip" };
         }
       }
-      return await this.#runTask(cell, claim, prev, rawPrev, reset, fetch);
+      return await this.#runTask(cell, claim, prev, rawPrev, fetch);
     } catch (error) {
       return { claim, kind: "failed", error };
     }
@@ -460,6 +502,8 @@ export class BuildEngine {
     fetch: (signal: string, key: string) => Promise<StoredRow | undefined>,
   ): Promise<boolean> {
     const fp = (row: StoredRow | undefined) => (row === undefined ? ABSENT : fingerprint(row.json));
+    // Whole-signal reads carry no fingerprint: such a task always runs when queued.
+    if (prev.l.length > 0) return false;
     if (prev.i?.length !== cell.inputs.length || prev.rh?.length !== prev.r.length) return false;
     for (let j = 0; j < cell.inputs.length; j++) {
       if (fp(await fetch(cell.inputs[j] as string, task)) !== prev.i[j]) return false;
@@ -476,7 +520,6 @@ export class BuildEngine {
     claim: Claim,
     prev: Trace,
     rawPrev: string | undefined,
-    reset: boolean,
     fetch: (signal: string, key: string) => Promise<StoredRow | undefined>,
   ): Promise<Outcome> {
     const taskKey = claim.task;
@@ -488,7 +531,7 @@ export class BuildEngine {
     const emitted: Emitted = new Map();
     const validate: Done["validate"] = [];
     const validateLists: Done["validateLists"] = [];
-    let state = reset ? undefined : prev.s;
+    let state = prev.s;
     // Incremental reduce: snapshot the change records now; the commit removes exactly these.
     const consumed = new Map<string, string>();
     const changes = new Map<string, { key: string; previous: string | null }[]>();
@@ -662,7 +705,12 @@ export class BuildEngine {
     if (register.length > 0) await this.#kv.commit(register);
   }
 
-  /** Commit a batch of outcomes in one store transaction. */
+  /**
+   * Commit a batch of outcomes in one store transaction. Each task's writes are
+   * collected separately; on a shared store they are guarded by the task's
+   * claim (its queue row still holding the claimed value), so the result of an
+   * engine whose claim went stale is dropped as a whole. Dequeues go last.
+   */
   async #commitBatch(outcomes: Outcome[], stats: RunStats, writesBefore: number): Promise<void> {
     await this.#locked(async () => {
       // Reads can only have gone stale if a source write landed while the batch
@@ -671,9 +719,11 @@ export class BuildEngine {
       const racy = this.#shared || this.#sourceWrites !== writesBefore;
       const valid = new Set<Outcome>();
       for (const o of outcomes) {
-        if (o.kind !== "done" || !racy || (await this.#validate(o))) valid.add(o);
+        if (o.kind !== "done") valid.add(o);
+        else if ((!racy || (await this.#validate(o))) && (await this.#changesUnchanged(o))) {
+          valid.add(o);
+        }
       }
-      const writes = new Map<string, KvWrite>();
       // Rows written earlier in this batch shadow the stored ones.
       const overlay = new Map<string, StoredRow | null>();
       const row = async (signal: string, key: string) => {
@@ -681,68 +731,115 @@ export class BuildEngine {
         if (overlay.has(id)) return overlay.get(id) ?? undefined;
         return this.#row(signal, key);
       };
-      const failures: { claim: Claim; error: unknown }[] = [];
-      for (const o of outcomes) {
-        if (!valid.has(o)) {
-          // Release our lease so the task is claimable again at once.
-          this.#release(o.claim, writes);
-          continue;
-        }
-        if (o.kind === "failed") {
-          failures.push(o);
-          continue;
-        }
-        if (o.kind === "skip") {
-          this.#dequeue(o.claim, writes);
-          stats.skipped++;
-          continue;
-        }
-        const { cell, task } = o.claim;
-        const self = k(cell, task);
-        // Ownership against earlier tasks of the same batch.
-        let conflict: string | undefined;
-        for (const { ref } of o.emitted.values()) {
-          const r = await row(ref[0], ref[1]);
-          if (r && r.owner !== "" && r.owner !== self) {
-            const sameBatch = overlay.has(k(ref[0], ref[1]));
-            if (sameBatch || !(await this.#stale(r.owner))) conflict = `${ref[0]}/${ref[1]}`;
+      const merged = new Map<string, KvWrite>();
+      const writtenBy = new Map<string, string>();
+      const dequeues: KvWrite[] = [];
+      const absorb = (claim: Claim, writes: Map<string, KvWrite>) => {
+        for (const [key, w] of writes) {
+          if (key === claim.qkey && w.value === undefined && w.ifValue === claim.raw) {
+            dequeues.push(w);
+            continue;
           }
+          let out = this.#shared ? { ...w, guard: { key: claim.qkey, value: claim.raw } } : w;
+          // A queue row re-armed by several tasks: any one of them suffices.
+          if (
+            writtenBy.has(key) &&
+            writtenBy.get(key) !== claim.qkey &&
+            key.startsWith(`q${SEP}`)
+          ) {
+            out = { key, value: w.value };
+          }
+          merged.set(key, out);
+          writtenBy.set(key, claim.qkey);
         }
-        if (conflict) {
-          failures.push({
-            claim: o.claim,
-            error: new ConflictingEmission(`${conflict}: emitted by another task`),
-          });
-          continue;
+      };
+      for (const o of outcomes) {
+        const writes = new Map<string, KvWrite>();
+        try {
+          if (!valid.has(o)) {
+            this.#release(o.claim, writes); // claimable again at once
+          } else if (o.kind === "failed") {
+            await this.#failWrites(o.claim, o.error, writes, stats);
+          } else if (o.kind === "skip") {
+            this.#dequeue(o.claim, writes);
+            if ((await this.#kv.get(k("d", o.claim.cell, o.claim.task))) !== undefined) {
+              set(writes, k("d", o.claim.cell, o.claim.task), undefined);
+            }
+            stats.skipped++;
+          } else {
+            await this.#doneWrites(o, row, overlay, writes, stats);
+          }
+        } finally {
+          absorb(o.claim, writes);
         }
-        for (const { ref, json } of o.emitted.values()) {
-          const r = await row(ref[0], ref[1]);
-          if (r?.json === json && r.owner === self) continue;
-          set(writes, k("r", ref[0], ref[1]), `${self}${OWNER_SEP}${json}`);
-          overlay.set(k(ref[0], ref[1]), { owner: self, json });
-          if (r?.json !== json) await this.#enqueueDependents(ref[0], ref[1], r?.json, writes);
-        }
-        for (const ref of o.prev.o) {
-          if (o.emitted.has(k(ref[0], ref[1]))) continue;
-          const r = await row(ref[0], ref[1]);
-          if (r?.owner !== self) continue; // handed over to another task
-          set(writes, k("r", ref[0], ref[1]), undefined);
-          overlay.set(k(ref[0], ref[1]), null);
-          await this.#enqueueDependents(ref[0], ref[1], r.json, writes);
-        }
-        this.#traceWrites(cell, task, o.prev, o.rawPrev, o.next, writes);
-        for (const [ckey, raw] of o.consumed) {
-          if (!writes.has(ckey)) writes.set(ckey, { key: ckey, ifValue: raw });
-        }
-        this.#dequeue(o.claim, writes);
-        if ((await this.#kv.get(k("d", cell, task))) !== undefined) {
-          set(writes, k("d", cell, task), undefined);
-        }
-        stats.executed++;
       }
-      for (const f of failures) await this.#failWrites(f.claim, f.error, writes, stats);
-      if (writes.size > 0) await this.#kv.commit([...writes.values()]);
+      const all = [...merged.values(), ...dequeues];
+      if (all.length > 0) await this.#kv.commit(all);
     });
+  }
+
+  /** The writes of a successful task (or, on a conflict, of its failure). */
+  async #doneWrites(
+    o: Done,
+    row: (signal: string, key: string) => Promise<StoredRow | undefined>,
+    overlay: Map<string, StoredRow | null>,
+    writes: Map<string, KvWrite>,
+    stats: RunStats,
+  ): Promise<void> {
+    const { cell, task } = o.claim;
+    const self = k(cell, task);
+    // Ownership against earlier tasks of the same batch, and settled owners.
+    for (const { ref } of o.emitted.values()) {
+      const r = await row(ref[0], ref[1]);
+      if (r && r.owner !== "" && r.owner !== self) {
+        const sameBatch = overlay.has(k(ref[0], ref[1]));
+        if (sameBatch || !(await this.#stale(r.owner))) {
+          const error = new ConflictingEmission(`${ref[0]}/${ref[1]}: emitted by another task`);
+          await this.#failWrites(o.claim, error, writes, stats);
+          return;
+        }
+      }
+    }
+    for (const { ref, json } of o.emitted.values()) {
+      const r = await row(ref[0], ref[1]);
+      if (r?.json === json && r.owner === self) continue;
+      set(writes, k("r", ref[0], ref[1]), `${self}${OWNER_SEP}${json}`);
+      overlay.set(k(ref[0], ref[1]), { owner: self, json });
+      if (r?.json !== json) await this.#enqueueDependents(ref[0], ref[1], r?.json, writes);
+    }
+    for (const ref of o.prev.o) {
+      if (o.emitted.has(k(ref[0], ref[1]))) continue;
+      const r = await row(ref[0], ref[1]);
+      if (r?.owner !== self) continue; // handed over to another task
+      set(writes, k("r", ref[0], ref[1]), undefined);
+      overlay.set(k(ref[0], ref[1]), null);
+      await this.#enqueueDependents(ref[0], ref[1], r.json, writes);
+    }
+    this.#traceWrites(cell, task, o.prev, o.rawPrev, o.next, writes);
+    for (const [ckey, raw] of o.consumed) {
+      if (!writes.has(ckey)) writes.set(ckey, { key: ckey, ifValue: raw });
+    }
+    this.#dequeue(o.claim, writes);
+    if ((await this.#kv.get(k("d", cell, task))) !== undefined) {
+      set(writes, k("d", cell, task), undefined);
+    }
+    stats.executed++;
+  }
+
+  /**
+   * Incremental reduce: the change records are exactly those the task saw. A
+   * change that landed meanwhile (new key, or a refreshed token) makes the
+   * result stale — it may or may not be reflected in what the task listed — so
+   * the task stays queued and runs again over the same state.
+   */
+  async #changesUnchanged(o: Done): Promise<boolean> {
+    if (!this.#topo.cell(o.claim.cell).incremental) return true;
+    let n = 0;
+    for await (const [ckey, raw] of this.#kv.scan(kp("c", o.claim.cell))) {
+      if (o.consumed.get(ckey) !== raw) return false;
+      n++;
+    }
+    return n === o.consumed.size;
   }
 
   #traceWrites(
@@ -792,7 +889,7 @@ export class BuildEngine {
     if ((await this.#kv.get(claim.qkey)) !== claim.raw) return;
     const attempts = claim.row.a + 1;
     if (attempts < this.#maxAttempts) {
-      const retry: QueueRow = { g: claim.row.g, a: attempts, ...(claim.row.z ? { z: 1 } : {}) };
+      const retry: QueueRow = { g: claim.row.g, a: attempts };
       writes.set(claim.qkey, { key: claim.qkey, value: JSON.stringify(retry), ifValue: claim.raw });
       return;
     }

@@ -148,7 +148,8 @@ upgrading Tailwind regenerates the stylesheet even when the entry is unchanged.
 - **The build is silent.** A source whose transform keeps failing is retried,
   then parked in the engine's dead letter while the rest of the project builds;
   `build()` then rejects with `newProjectBuild: N source(s) failed to build; …`.
-  Editing the source retries it.
+  Every `build()` retries the sources that failed last time (their dependencies
+  are not tracked by the engine, so fixing one would not re-queue them).
 
 ### Dependencies
 

@@ -138,6 +138,9 @@ export function newProjectBuild(opts: ProjectBuildOptions): ProjectBuild {
         cells: webrunCells(host),
       });
       await scanSources(engine, { files: project, root: "/" });
+      // Retry what failed last time: a source's closure reads files the engine
+      // does not track (its dependencies), so fixing one would not re-queue it.
+      for (const d of await engine.deadLetters()) await engine.requeue(d.cell, d.key);
       await engine.run();
       const failed = await engine.deadLetters();
       if (failed.length > 0) {

@@ -1,4 +1,4 @@
-import { type FilesApi, joinPath } from "@statewalker/webrun-files";
+import { type FilesApi, joinPath, tryReadText } from "@statewalker/webrun-files";
 import { tryReadJson, writeJsonAtomic } from "../json-io.js";
 import { seqKey } from "../keys.js";
 import { conditionHolds, type KV, type KvMetrics, type KvWrite, MemKV } from "./kv.js";
@@ -45,7 +45,7 @@ export class FilesKV implements KV {
     opts?: { compactEvery?: number },
   ): Promise<FilesKV> {
     const mem = new MemKV();
-    const snap = await tryReadJson<Snapshot>(files, joinPath(dir, "snapshot.json"));
+    const snap = await readJsonStrict<Snapshot>(files, joinPath(dir, "snapshot.json"));
     let seq = snap?.seq ?? 0;
     if (snap) await mem.commit(snap.rows.map(([key, value]) => ({ key, value })));
     const logDir = joinPath(dir, "log");
@@ -65,7 +65,11 @@ export class FilesKV implements KV {
         continue;
       }
       const writes = await tryReadJson<Write[]>(files, joinPath(logDir, `${seqKey(n)}.json`));
-      if (!writes) break;
+      if (!writes) {
+        // Only the last segment can be torn (a crash mid-write); a gap is corruption.
+        if (n !== found.at(-1)) throw new Error(`FilesKV: corrupt log segment ${n} in ${dir}`);
+        break;
+      }
       await mem.commit(writes);
       seq = n;
       segments.push(n);
@@ -91,11 +95,15 @@ export class FilesKV implements KV {
     const result = this.lock.then(async () => {
       const applied: boolean[] = [];
       const effective: Write[] = [];
+      // Evaluate in order against the stored state plus this commit's earlier writes.
+      const pending = new Map<string, string | undefined>();
+      const lookup = (k: string) => (pending.has(k) ? pending.get(k) : this.mem.peek(k));
       for (const w of writes) {
-        const ok = conditionHolds(w, this.mem.peek(w.key));
+        const ok = conditionHolds(w, lookup);
         applied.push(ok);
-        if (ok)
-          effective.push(w.value === undefined ? { key: w.key } : { key: w.key, value: w.value });
+        if (!ok) continue;
+        pending.set(w.key, w.value);
+        effective.push(w.value === undefined ? { key: w.key } : { key: w.key, value: w.value });
       }
       if (effective.length === 0) return applied;
       const n = this.seq + 1;
@@ -122,5 +130,16 @@ export class FilesKV implements KV {
       await this.files.remove(joinPath(this.dir, "log", `${seqKey(n)}.json`));
     }
     this.segments = this.segments.filter((n) => n > snap.seq);
+  }
+}
+
+/** Missing → undefined; present but unparseable → throws (never replay onto empty state). */
+async function readJsonStrict<T>(files: FilesApi, path: string): Promise<T | undefined> {
+  const text = await tryReadText(files, path);
+  if (text === undefined) return undefined;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(`FilesKV: corrupt snapshot ${path}`);
   }
 }

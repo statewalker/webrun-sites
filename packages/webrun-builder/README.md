@@ -261,10 +261,14 @@ again with the new value.
 
 ### Verify before execute
 
-Each task's trace keeps a fingerprint of every row it read (its own input rows included):
-small values verbatim, larger ones as length plus two 32-bit hashes. A queued map task whose reads
-all match is dequeued without running (`RunStats.skipped`). This happens for a change undone
-before the run (remove + put back, A → B → A), or a spurious re-queue. `invalidate` bypasses it.
+Each map task's trace keeps a fingerprint of every row it read with `ctx.get` (its own input rows
+included): small values verbatim, larger ones as length plus two 32-bit hashes. A queued map task
+whose reads all match is dequeued without running (`RunStats.skipped`). This happens for a change
+undone before the run (remove + put back, A → B → A), or a spurious re-queue. It does not apply to:
+- tasks that `list` a signal, which always run when queued;
+- reduce cells;
+- tasks after `invalidate` or `requeue`, which drop the fingerprints (and an incremental reduce's
+  state) from the trace so they run once more whatever else re-queues them.
 
 ### Concurrent writes and several engines
 
@@ -273,13 +277,17 @@ before the run (remove + put back, A → B → A), or a spurious re-queue. `inva
   hits a row the task read dynamically, the batch commit (which takes the same lock as `put`)
   re-checks those reads and leaves stale tasks queued.
 - **Several engines on one store (`shared: true`):** claims become leases (`leaseMs`, default
-  30 s), taken with conditional writes, so a task runs in one engine at a time. A crashed engine's
-  claims become claimable again when its lease expires. Tasks that read source rows dynamically
+  30 s), taken with conditional writes. Every write of a task's commit is guarded by its claim (the
+  queue row still holding the value it claimed; in SQL, `… AND EXISTS (…)` on the same
+  transaction). So if the claim went stale — the task was re-queued by a write, or its lease expired
+  and another engine took it — the whole result is dropped and the task runs again. A task may thus
+  execute twice, but a stale result never overwrites a newer one. A crashed engine's claims become
+  claimable again when its lease expires. Tasks that read source rows dynamically
   register those reads in the reverse index before re-checking them, so a write from another engine
   is either seen by the check or finds the registration and re-queues the task. This needs a store
   whose conditions hold across those engines: `SqlKV` across processes, `MemKV` within one process.
   `FilesKV` is single-process. `run()` reports `pending: true` while the most upstream work is
-  leased by another engine.
+  leased by another engine. Incremental reduce cells are not supported with `shared: true`.
 
 ### Incremental reduce
 
@@ -300,7 +308,8 @@ For an incremental reduce, the engine records, per changed input row, the value 
 task's last successful run. `ctx.changes(signal)` returns those changes with their current and
 previous values, and `ctx.state` / `ctx.setState` carry a small state between runs (stored with the
 trace). `ctx.state` is `undefined` on the first run and after `invalidate`; recompute with `list`
-then.
+then. If an input changes while the reducer runs, its result is discarded at commit and it runs
+again, so a change is neither lost nor counted twice.
 
 ### What will surprise you
 
@@ -315,6 +324,9 @@ then.
   for large inputs.
 - **Two producers in different engines** emitting the same row at the same moment can both commit
   (last writer wins). The ownership check reads before the commit.
+- **Changing the cell set on a persistent store:** queue rows of removed cells are dropped, and rows
+  queued under an old rank move to the cell's current rank. Rows, traces and index entries of
+  removed cells stay in the store.
 
 ## License
 

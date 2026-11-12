@@ -30,11 +30,22 @@ export interface KvWrite {
   value?: string;
   /** Apply only if the current value equals this (`null`: only if absent). */
   ifValue?: string | null;
+  /**
+   * Apply only if another key currently holds a value — e.g. a task's claim on
+   * its queue row, so a stale engine's results are dropped as a whole. Writes
+   * apply in order: a guard sees the effect of earlier writes of the commit.
+   */
+  guard?: { key: string; value: string };
 }
 
-/** Whether a write's condition holds against the current value. */
-export function conditionHolds(write: KvWrite, current: string | undefined): boolean {
+/** Whether a write's conditions hold; `lookup` gives current values (earlier writes applied). */
+export function conditionHolds(
+  write: KvWrite,
+  lookup: (key: string) => string | undefined,
+): boolean {
+  if (write.guard && lookup(write.guard.key) !== write.guard.value) return false;
   if (write.ifValue === undefined) return true;
+  const current = lookup(write.key);
   return write.ifValue === null ? current === undefined : current === write.ifValue;
 }
 
@@ -103,7 +114,7 @@ export class MemKV implements KV {
     const applied: boolean[] = [];
     for (const w of writes) {
       const { key, value } = w;
-      const ok = conditionHolds(w, this.values.get(key));
+      const ok = conditionHolds(w, (k) => this.values.get(k));
       applied.push(ok);
       if (!ok) continue;
       if (value === undefined) {
