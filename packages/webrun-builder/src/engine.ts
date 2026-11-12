@@ -62,6 +62,7 @@ import {
   type Json,
   type Row,
   type RunOptions,
+  type RunProgress,
   type RunStats,
   type TaskContext,
 } from "./types.js";
@@ -322,15 +323,18 @@ export class BuildEngine {
       const writesBefore = this.#sourceWrites;
       const outcomes = await this.#executeAll(claims);
       const before = { ...stats };
-      await this.#commitBatch(outcomes, stats, writesBefore);
-      opts?.onProgress?.({
-        builder: (claims[0] as Claim).builder,
-        tasks: claims.length,
-        executed: stats.executed - before.executed,
-        skipped: stats.skipped - before.skipped,
-        failed: stats.failed - before.failed,
-        deadLettered: stats.deadLettered - before.deadLettered,
-      });
+      const released = await this.#commitBatch(outcomes, stats, writesBefore);
+      if (opts?.onProgress) {
+        this.#report(opts.onProgress, {
+          builder: (claims[0] as Claim).builder,
+          tasks: claims.length,
+          executed: stats.executed - before.executed,
+          skipped: stats.skipped - before.skipped,
+          failed: stats.failed - before.failed,
+          deadLettered: stats.deadLettered - before.deadLettered,
+          released,
+        });
+      }
     }
   }
 
@@ -735,7 +739,8 @@ export class BuildEngine {
    * claim (its queue row still holding the claimed value), so the result of an
    * engine whose claim went stale is dropped as a whole. Dequeues go last.
    */
-  async #commitBatch(outcomes: Outcome[], stats: RunStats, writesBefore: number): Promise<void> {
+  async #commitBatch(outcomes: Outcome[], stats: RunStats, writesBefore: number): Promise<number> {
+    let released = 0;
     await this.#locked(async () => {
       // Reads can only have gone stale if a source write landed while the batch
       // ran: in this engine (counted; none can land now, they take this lock) or
@@ -782,6 +787,7 @@ export class BuildEngine {
         try {
           if (!valid.has(o)) {
             this.#release(o.claim, writes); // claimable again at once
+            released++;
           } else if (o.kind === "failed") {
             await this.#failWrites(o.claim, o.error, writes, stats);
           } else if (o.kind === "skip") {
@@ -800,6 +806,21 @@ export class BuildEngine {
       const all = [...merged.values(), ...dequeues];
       if (all.length > 0) await this.#kv.commit(all);
     });
+    return released;
+  }
+
+  /** Call a progress callback; its errors (thrown or rejected) are logged, never propagated. */
+  #report(callback: (progress: RunProgress) => void, progress: RunProgress): void {
+    try {
+      const result = callback(progress) as unknown;
+      if (result && typeof (result as Promise<unknown>).then === "function") {
+        (result as Promise<unknown>).then(undefined, (error) =>
+          this.#log.warn("onProgress rejected", { error }),
+        );
+      }
+    } catch (error) {
+      this.#log.warn("onProgress threw", { error });
+    }
   }
 
   /** The writes of a successful task (or, on a conflict, of its failure). */

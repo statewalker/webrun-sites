@@ -162,12 +162,21 @@ atomic `commit(writes)`, where a write may carry a condition (`ifValue`, an SQL 
 ```ts
 import { scanSources } from "@statewalker/webrun-builder";
 
-await scanSources(engine, { files, root: "/" });   // → { seen, changed, removed, deferred }
+await scanSources(engine, { files, root: "/" });   // → { seen, changed, removed, more }
 await engine.run({ onProgress: (p) => console.log(p.builder, p.executed) }); // per committed batch
+```
 
-// A large corpus in batches: each batch flows through the whole pipeline before the next.
-while ((await scanSources(engine, { files, root: "/", limit: 100 })).deferred > 0) await engine.run();
+A large corpus in batches, each flowing through the whole pipeline before the next (`limit` is a
+positive integer; the cursor rotates the start, so a file that changes on every scan cannot hold
+the others back):
+
+```ts
+let scan = await scanSources(engine, { files, root: "/", limit: 100 });
 await engine.run();
+while (scan.more) {
+  scan = await scanSources(engine, { files, root: "/", limit: 100, after: scan.cursor });
+  await engine.run();
+}
 ```
 
 One row per file, keyed by its root-relative path, valued by `{ mtime, size }` (or your

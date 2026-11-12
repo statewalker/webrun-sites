@@ -128,19 +128,28 @@ export interface RunOptions {
   maxTasks?: number;
   /** Stop between batches once aborted. */
   signal?: AbortSignal;
-  /** Called after each committed batch (for progress displays and logs). */
+  /**
+   * Called after each committed batch (for progress displays and logs). Synchronous; an
+   * error it throws (or a promise it returns that rejects) is logged and ignored.
+   */
   onProgress?: (progress: RunProgress) => void;
 }
 
-/** One committed batch of a run: all its tasks belong to one builder. */
+/**
+ * One committed batch of a run: all its tasks belong to one builder. `tasks` =
+ * executed + skipped + failed + released; a dead-lettered task is also a failed one.
+ */
 export interface RunProgress {
   builder: string;
   /** Tasks claimed in the batch. */
   tasks: number;
   executed: number;
   skipped: number;
+  /** Failed attempts (retried later in the run, or dead-lettered). */
   failed: number;
   deadLettered: number;
+  /** Claims given back because what the task read changed meanwhile: they run again. */
+  released: number;
 }
 
 export interface RunStats {
