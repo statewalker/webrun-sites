@@ -84,8 +84,8 @@ export interface DeadLetter {
 }
 
 export interface Engine {
-  put(signal: string, key: string, value: Json): Promise<void>;
-  remove(signal: string, key: string): Promise<void>;
+  put(signal: string, key: string, value: Json): Promise<unknown>;
+  remove(signal: string, key: string): Promise<unknown>;
   get(signal: string, key: string): Promise<Json | undefined>;
   list(signal: string): Promise<{ key: string; value: Json }[]>;
   run(opts?: RunOptions): Promise<RunStats>;

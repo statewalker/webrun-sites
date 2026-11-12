@@ -14,10 +14,10 @@
     "format": "biome format --write ."
   },
   "dependencies": {
+    "@statewalker/webrun-builder": "workspace:^",
     "@statewalker/webrun-dataflow": "workspace:^"
   },
   "devDependencies": {
-    "@statewalker/webrun-cells": "workspace:^",
     "@statewalker/webrun-files-sqlite": "catalog:",
     "@types/node": "catalog:",
     "tsx": "catalog:",

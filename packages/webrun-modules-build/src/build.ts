@@ -1,4 +1,4 @@
-import { BuildEngine, NULL_LOGGER } from "@statewalker/webrun-builder";
+import { BuildEngine, FilesKV, scanSources } from "@statewalker/webrun-builder";
 import type { FilesApi } from "@statewalker/webrun-files";
 import { tryReadText, writeText } from "@statewalker/webrun-files";
 import {
@@ -20,7 +20,7 @@ import {
   type UrlPolicy,
 } from "@statewalker/webrun-modules";
 import { newTailwindTransform, tailwindCacheKey } from "@statewalker/webrun-tailwind";
-import { webrunBuilders } from "./cells.js";
+import { SERVED_SIGNAL, webrunCells } from "./cells.js";
 import type { WebrunBuildHost } from "./host.js";
 import { makeExtMapPolicy } from "./url-policy.js";
 
@@ -44,18 +44,10 @@ export interface ProjectBuildOptions {
 
 /** A prepared batch build over a project. */
 export interface ProjectBuild {
-  /** Run the pipeline to convergence; returns the emitted entry pointers. */
+  /** Scan the project and run the pipeline to convergence; returns the emitted entry pointers. */
   build(): Promise<{ served: string[] }>;
 }
 
-/**
- * Assemble the batch module builder: the shared `PreprocessContext` (ext-map policy,
- * explicit `HostRegistry`, in-flight dedupe, target-derived globals) + a
- * `BuildEngine` over the project (`files = project`, state co-located under
- * `.project`, emitted artifacts → `cache`) + the classify/preprocess/prune/serve
- * cells. The `host.engine` back-ref is wired post-construction so cells can drain
- * their own input.
- */
 /** FNV-1a (32-bit) content hash — a dependency-free digest for the per-id source
  *  sidecar that gates re-emit. Collision risk is negligible for change detection. */
 function hashSource(source: string): string {
@@ -67,6 +59,13 @@ function hashSource(source: string): string {
   return (h >>> 0).toString(16);
 }
 
+/**
+ * Assemble the batch module builder: the shared `PreprocessContext` (ext-map policy,
+ * explicit `HostRegistry`, in-flight dedupe, target-derived globals) + a
+ * `BuildEngine` whose state lives in `project/.project/state` (a `FilesKV`) +
+ * the preprocess cell. Each `build()` scans the project into the `sources`
+ * signal and runs the engine; emitted artifacts go to `cache`.
+ */
 export function newProjectBuild(opts: ProjectBuildOptions): ProjectBuild {
   const { project, cache } = opts;
   // The scanner re-ingests `~`-prefixed emitted ids; if project and cache were the
@@ -103,7 +102,6 @@ export function newProjectBuild(opts: ProjectBuildOptions): ProjectBuild {
   // plain `css` transform there — server behaviour is unchanged.
   ctx.transforms?.register(newTailwindTransform());
 
-  const served: string[] = [];
   const emitted = new Set<string>();
   // The opt-in incremental gate consulted by `walkFrom` for EVERY closure node
   // (entry + interior + shared): reuse the emitted artifact when the source is
@@ -128,23 +126,27 @@ export function newProjectBuild(opts: ProjectBuildOptions): ProjectBuild {
     emitted.add(id);
     return false;
   };
-  const host = { project, cache, ctx, emitted } as WebrunBuildHost;
-  const engine = new BuildEngine<WebrunBuildHost>({
-    files: project,
-    rootPath: "/",
-    systemFolder: ".project",
-    logger: NULL_LOGGER,
-    host,
-  });
-  host.engine = engine;
-  for (const builder of webrunBuilders(served)) engine.registerBuilder(builder);
+  const host: WebrunBuildHost = { project, cache, ctx, emitted };
+  // Engine state (rows, queue, traces) lives in the project's `.project/state`
+  // folder — a dot-folder, so the scanner never sees it.
+  let engine: BuildEngine | undefined;
 
   return {
     async build() {
-      for await (const _ of engine.run()) {
-        // Drain progress events to convergence.
+      engine ??= new BuildEngine({
+        store: await FilesKV.open(project, "/.project/state"),
+        cells: webrunCells(host),
+      });
+      await scanSources(engine, { files: project, root: "/" });
+      await engine.run();
+      const failed = await engine.deadLetters();
+      if (failed.length > 0) {
+        const [first] = failed;
+        throw new Error(
+          `newProjectBuild: ${failed.length} source(s) failed to build; first: ${first?.key}: ${first?.error}`,
+        );
       }
-      return { served: [...served] };
+      return { served: await engine.keys(SERVED_SIGNAL) };
     },
   };
 }

@@ -1,63 +1,41 @@
 /**
- * Static-pipeline benchmark against the existing `@statewalker/webrun-cells`
- * engine (which has no dynamic reads or reduce cells), all on node:sqlite
- * in memory, so wall times are comparable.
+ * Static-pipeline benchmark on node:sqlite (in memory) vs MemKV: prototype B
+ * and the real engine (`@statewalker/webrun-builder`), so wall times on a real
+ * database are comparable. (The removed `webrun-cells` engine was measured here
+ * before it was deleted; see README.)
  *
  *   pnpm tsx bench/static.ts 2000
  */
 import { DatabaseSync } from "node:sqlite";
-import { type Cell, CellEngine } from "@statewalker/webrun-cells";
+import { BuildEngine, SqlKV as RealSqlKV } from "@statewalker/webrun-builder";
 import { NodeSqlDriver } from "@statewalker/webrun-files-sqlite";
 import { double, len, rng, split, upper } from "../src/core/fixtures.js";
 import { MemKV } from "../src/core/kv.js";
 import { SqlKV } from "../src/core/sql-kv.js";
-import type { CellDef, Json } from "../src/core/types.js";
+import type { CellDef } from "../src/core/types.js";
 import { QueueEngine } from "../src/prototypes/queue.js";
 
 const CELLS: CellDef[] = [split, upper, len, double];
 const WORDS = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu".split(" ");
 
-/** Adapt a lab map cell (single input, reads only its own key) to webrun-cells. */
-function toCellsCell(c: CellDef): Cell {
-  return {
-    id: c.id,
-    inputs: c.inputs,
-    outputs: c.outputs,
-    async *run(inputs) {
-      for await (const input of inputs) {
-        const out: { signal: string; key: string; value: Json }[] = [];
-        await c.run({
-          key: input.key,
-          get: async (s, k) => (s === input.signal && k === input.key ? input.value : undefined),
-          list: async () => {
-            throw new Error("unsupported");
-          },
-          emit: (signal, key, value) => out.push({ signal, key, value }),
-        });
-        yield* out;
-      }
-    },
-  };
-}
-
 interface Target {
   label: string;
-  put(k: string, v: string): Promise<void>;
-  remove(k: string): Promise<void>;
+  put(k: string, v: string): Promise<unknown>;
+  remove(k: string): Promise<unknown>;
   run(): Promise<number>;
 }
 
 function targets(): Target[] {
   const sqlite = () => new NodeSqlDriver(new DatabaseSync(":memory:"));
-  const cells = new CellEngine({ db: sqlite(), cells: CELLS.map(toCellsCell), batchSize: 64 });
   const bSql = new QueueEngine({ kv: new SqlKV(sqlite()), cells: CELLS });
   const bMem = new QueueEngine({ kv: new MemKV(), cells: CELLS });
+  const rSql = new BuildEngine({ store: new RealSqlKV(sqlite()), cells: CELLS });
   return [
     {
-      label: "webrun-cells (SQLite)",
-      put: (k, v) => cells.put("docs", k, v),
-      remove: (k) => cells.remove("docs", k),
-      run: async () => (await cells.run()).committed,
+      label: "webrun-builder (SQLite)",
+      put: (k, v) => rSql.put("docs", k, v),
+      remove: (k) => rSql.remove("docs", k),
+      run: async () => (await rSql.run()).executed,
     },
     {
       label: "B queue (SQLite)",
@@ -85,7 +63,7 @@ async function main(): Promise<void> {
     );
   }
   const keys = [...docs.keys()];
-  const scenarios: [string, (t: Target) => Promise<void>][] = [
+  const scenarios: [string, (t: Target) => Promise<unknown>][] = [
     [
       "cold build",
       async (t) => {

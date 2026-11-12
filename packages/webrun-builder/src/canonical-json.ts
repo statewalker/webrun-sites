@@ -2,8 +2,9 @@ import type { Json } from "./types.js";
 
 /**
  * JSON text with object keys sorted at every depth, so equal values have equal
- * text. Throws TypeError on anything JSON cannot represent exactly, instead of
- * letting JSON.stringify turn it into `null` or drop it.
+ * text — "unchanged" means byte-equal canonical text. Throws `TypeError` on
+ * values JSON cannot represent exactly (`undefined`, `NaN`, `Infinity`, class
+ * instances) instead of letting `JSON.stringify` drop or coerce them.
  */
 export function canonicalJson(value: Json): string {
   return JSON.stringify(normalize(value));
@@ -20,7 +21,7 @@ function normalize(value: unknown): unknown {
     const proto = Object.getPrototypeOf(value);
     if (proto === Object.prototype || proto === null) {
       const record = value as Record<string, unknown>;
-      // No prototype, so a "__proto__" key is stored as data, not as a prototype.
+      // No prototype, so a "__proto__" key is stored as data.
       const out: Record<string, unknown> = Object.create(null);
       for (const key of Object.keys(record).sort()) out[key] = normalize(record[key]);
       return out;

@@ -480,7 +480,10 @@ export class TraceEngine implements Engine {
         throw new ConflictingEmission(`${e.signal}/${e.key}: already emitted by ${oc}/${ok}`);
       }
       let keys = outputs.get(e.signal);
-      if (!keys) outputs.set(e.signal, (keys = []));
+      if (!keys) {
+        keys = [];
+        outputs.set(e.signal, keys);
+      }
       keys.push(e.key);
       if (row?.json !== e.json) {
         changes.push({ signal: e.signal, key: e.key, json: e.json, existence: row === null });
@@ -497,6 +500,9 @@ export class TraceEngine implements Engine {
 
 function trackGet(reads: Reads, signal: string, key: string, present: boolean): void {
   let m = reads.gets.get(signal);
-  if (!m) reads.gets.set(signal, (m = new Map()));
+  if (!m) {
+    m = new Map();
+    reads.gets.set(signal, m);
+  }
   if (!m.has(key)) m.set(key, present);
 }

@@ -40,6 +40,13 @@ const ENGINES: Record<string, { label: string; load: () => Promise<EngineFactory
     },
   },
   b: { label: "B queue", load: async () => (o) => new QueueEngine(o) },
+  r: {
+    label: "R webrun-builder",
+    load: async () => {
+      const m = await import("@statewalker/webrun-builder");
+      return (o) => new m.BuildEngine({ store: o.kv, cells: o.cells, maxAttempts: o.maxAttempts });
+    },
+  },
   c: {
     label: "C traces",
     load: async () => {
@@ -121,7 +128,12 @@ function scenarios(w: Workload): Scenario[] {
         for (const k of pct) await e.put("docs", k, `changed ${k} text here`);
       },
     },
-    { name: "delete 1 doc", ops: async (e) => e.remove("docs", docKeys[2] as string) },
+    {
+      name: "delete 1 doc",
+      ops: async (e) => {
+        await e.remove("docs", docKeys[2] as string);
+      },
+    },
     {
       name: "edit leaf module",
       ops: async (e) => {
@@ -168,7 +180,7 @@ async function bench(name: string, factory: EngineFactory, w: Workload): Promise
 
 async function main(): Promise<void> {
   const n = Number(process.argv[2] ?? 1000);
-  const which = (process.argv[3] ?? "p0,a,b,c").split(",");
+  const which = (process.argv[3] ?? "p0,a,b,c,r").split(",");
   const w = workload(n);
   const all: Row[] = [];
   const sizes: Record<string, { rows: number; bytes: number }> = {};

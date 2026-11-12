@@ -27,7 +27,7 @@ tools/      private test harness (consumer-install)
 | Package | Description | npm |
 | --- | --- | --- |
 | [`@statewalker/webrun-dataflow`](packages/webrun-dataflow) | Signal-driven dataflow graph: impact propagation, topological order, transaction and updates stores. No runtime dependencies. | [npm](https://www.npmjs.com/package/@statewalker/webrun-dataflow) |
-| [`@statewalker/webrun-builder`](packages/webrun-builder) | `BuildEngine<THost>`: incremental, resumable build engine on top of `webrun-dataflow`, with a built-in source scanner and file-backed state. | [npm](https://www.npmjs.com/package/@statewalker/webrun-builder) |
+| [`@statewalker/webrun-builder`](packages/webrun-builder) | `BuildEngine`: key-level incremental, resumable build engine — cells over signals with dynamic dependencies, early cut-off, retraction and dead letters; state in a pluggable KV (memory, `FilesApi`, SQLite); `scanSources` for file trees. | [npm](https://www.npmjs.com/package/@statewalker/webrun-builder) |
 | [`@statewalker/webrun-modules`](packages/webrun-modules) | Isomorphic module server: resolves, downloads and transforms npm packages and authored TS/JS into ESM, served from a `FilesApi` cache. | [npm](https://www.npmjs.com/package/@statewalker/webrun-modules) |
 | [`@statewalker/webrun-modules-build`](packages/webrun-modules-build) | Batch module build: runs the `webrun-modules` transforms through `BuildEngine` and writes a static `.js`/`.css` tree. | [npm](https://www.npmjs.com/package/@statewalker/webrun-modules-build) |
 | [`@statewalker/webrun-tailwind`](packages/webrun-tailwind) | Build-only Tailwind CSS v4 transform for the `webrun-modules` transform registry (Node only). | [npm](https://www.npmjs.com/package/@statewalker/webrun-tailwind) |
@@ -38,6 +38,7 @@ tools/      private test harness (consumer-install)
 | [`@statewalker/site-builder-jspm-demo`](apps/site-builder-jspm-demo) | Private demo: bare imports resolved in the browser with `@jspm/generator`. | — |
 | [`@statewalker/p2p-demo`](apps/p2p-demo) | Private demo: HTTP between two browsers over libp2p (relay + WebRTC). | — |
 | [`@statewalker/livekit-demo`](apps/livekit-demo) | Private demo: the same as `p2p-demo`, with LiveKit as the transport. | — |
+| [`@statewalker/webrun-build-lab`](packages/webrun-build-lab) | Private: the engine design lab — alternative prototypes, the shared conformance suite and benchmarks behind `webrun-builder`. | — |
 | [`@statewalker/consumer-install-tests`](tools/consumer-install) | Private test harness: packs the packages and installs them into a clean consumer project. | — |
 
 How the packages depend on each other:

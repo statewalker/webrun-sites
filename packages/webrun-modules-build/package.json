@@ -3,7 +3,7 @@
   "version": "0.2.3",
   "private": false,
   "type": "module",
-  "description": "Batch module builder: drives the shared @statewalker/webrun-modules preprocess core through @statewalker/webrun-builder's BuildEngine with an ext-map URL policy, emitting a static .js/.css tree to a cache FilesApi.",
+  "description": "Batch module builder: drives the shared @statewalker/webrun-modules preprocess core through the @statewalker/webrun-builder incremental engine with an ext-map URL policy, emitting a static .js/.css tree to a cache FilesApi.",
   "bugs": {
     "url": "https://github.com/statewalker/webrun-sites/issues"
   },
@@ -42,7 +42,6 @@
   },
   "dependencies": {
     "@statewalker/webrun-builder": "workspace:^",
-    "@statewalker/webrun-dataflow": "workspace:^",
     "@statewalker/webrun-files": "catalog:",
     "@statewalker/webrun-modules": "workspace:^",
     "@statewalker/webrun-tailwind": "workspace:^"

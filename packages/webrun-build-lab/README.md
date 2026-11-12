@@ -18,10 +18,11 @@ are built red/green against one conformance suite, then compared on the same wor
 | `src/prototypes/queue.ts` | **B** eager dirty queue + reverse-dependency index (webrun-cells lineage). |
 | `src/prototypes/traces.ts` | **C** pull / verifying traces (Salsa, Shake, "Build Systems à la Carte"). |
 | `tests/conformance.ts` | 24 tests run against every prototype, incl. a crash at *every* commit followed by resume (state must equal the oracle, rework ≤ a clean run) and a randomized model check against P0. |
+| `tests/builder.test.ts` | The suite against the real engine (`webrun-builder`): batch 1, batch 64, concurrency 4, SQLite. |
 | `bench/run.ts`, `bench/static.ts` | Benchmarks; results in `bench/results/`. |
 
 ```sh
-pnpm test                      # 97 tests: suite × {A, B, C, B-over-SQLite} + P0
+pnpm test                      # 193 tests: suite × {A, B, C, B-on-SQLite, R ×4 configs} + P0
 pnpm bench -- 5000             # all engines, N docs + N modules
 pnpm tsx bench/static.ts 2000  # B vs the existing webrun-cells, both on SQLite
 ```
@@ -47,31 +48,34 @@ The axis that separates them is **where change discovery is paid**.
 
 ## Results (N = 5000 docs + 5000 modules, MemKV)
 
-Task executions are identical for A, B and C in every scenario (minimal, as the suite requires);
-the difference is bookkeeping. KV reads = gets + rows scanned.
+Task executions are identical for A, B, C and R in every scenario (minimal, as the suite
+requires); the difference is bookkeeping. Reads = KV gets + rows scanned; writes = rows written
+or deleted. **R** is the real implementation (`@statewalker/webrun-builder`: B + group commit).
 
-| scenario | P0 ms | A: reads / rows written / ms | B: reads / rows written / ms | C: reads / rows written / ms |
-|---|---|---|---|---|
-| no-op | 0.2 | 0 / 0 / 0.0 | 1 / 0 / 0.1 | 0 / 0 / 0.0 |
-| edit 1 doc | 569 | 5 023 / 34 / 17 | 5 050 / **16** / **8.6** | 70 005 / 18 / 243 |
-| edit 1 doc, cut-off | 421 | 16 / 18 / 2.7 | 34 / **9** / **1.6** | 55 004 / 10 / 198 |
-| edit 1% docs | 488 | 6 652 / 2 410 / 460 | 8 161 / **1 302** / **158** | 70 302 / 1 304 / 217 |
-| delete 1 doc | 629 | 5 035 / 58 / 29 | 5 056 / **35** / **9.9** | 70 010 / 42 / 161 |
-| edit leaf module | 701 | 121 / 91 / 18 | 200 / **58** / **5.6** | 20 013 / 54 / 59 |
-| edit hub module | 542 | 973 / 701 / 139 | 1 622 / 464 / **42.6** | 20 095 / **420** / 71.6 |
-| stored state | 115k rows | 210k rows, 10.7 MB | 140k rows, **7.5 MB** | 115k rows, 8.8 MB |
+| scenario | P0 ms | A reads / writes / ms | B reads / writes / ms | C reads / writes / ms | R reads / writes / commits / ms |
+|---|---|---|---|---|---|
+| cold build | 614 | 245k / 265k / 1315 | 430k / 235k / 1327 | 170k / 250k / 950 | 490k / 230k / **10.7k** / 1411 |
+| no-op | 0.1 | 0 / 0 / 0.0 | 1 / 0 / 0.2 | 0 / 0 / 0.0 | 1 / 0 / 0 / 0.1 |
+| edit 1 doc | 664 | 5 023 / 34 / 9.1 | 5 050 / **16** / **7.1** | 70 005 / 18 / 178 | 5 058 / **16** / 6 / 11.1 |
+| edit 1 doc, cut-off | 633 | 16 / 18 / 0.2 | 34 / **9** / **0.1** | 55 004 / 10 / 148 | 40 / **9** / 4 / 0.3 |
+| edit 1% docs | 537 | 6 652 / 2 410 / 22.1 | 8 161 / 1 302 / **14.0** | 70 302 / 1 304 / 174 | 8 662 / **1 253** / **58** / 21.7 |
+| delete 1 doc | 562 | 5 035 / 58 / 11.9 | 5 056 / **35** / **5.7** | 70 010 / 42 / 216 | 5 057 / **35** / 6 / 8.8 |
+| edit leaf module | 526 | 121 / 91 / 0.8 | 200 / 58 / **0.7** | 20 013 / 54 / 69 | 217 / **53** / 3 / 1.0 |
+| edit hub module | 434 | 973 / 701 / **4.4** | 1 622 / 464 / 5.4 | 20 095 / 420 / 81 | 1 761 / **419** / 4 / 6.0 |
+| stored state | 115k rows | 210k rows, 10.7 MB | 140k rows, **7.5 MB** | 115k rows, 8.8 MB | 140k rows, **7.5 MB** |
 
-(The ~5 000 rows read by A and B on a doc edit are the `stats` reduce re-listing `len`: a
+(The ~5 000 rows read by A, B and R on a doc edit are the `stats` reduce re-listing `len`: a
 non-incremental reduce costs the same in every design.)
 
-Scaling from N=1000 to N=5000: A and B incremental costs stay flat (they are proportional to the
+Scaling from N=1000 to N=5000: A, B and R incremental costs stay flat (proportional to the
 change); C's verification grows 5× (proportional to the number of traces of touched cells).
+Full numbers: `bench/results/bench-{1000,5000}.md`.
 
-On SQLite (`bench/static.ts`, N=2000), B matches the existing `webrun-cells` on a cold build
-(3.0 s vs 2.9 s) and is faster incrementally (edit 1 doc 2.3 vs 4.2 ms, 1% 32 vs 43 ms), while also
-supporting dynamic reads and reduce cells.
+On SQLite (`bench/static.ts`, N=2000, static pipeline), before it was deleted the existing
+`webrun-cells` engine took 2.9 s for a cold build, 4.2 ms for one edit and 43 ms for 1%; R takes
+2.7 s, 2.3 ms and 29 ms — while also supporting dynamic reads, reduce cells and `dispose`.
 
-### Verdict: B is the basis for the real implementation
+### Verdict: B is the basis for the real implementation (now `@statewalker/webrun-builder`)
 
 - **Lowest incremental cost**: fewest rows written and best wall time in every edit scenario;
   cost proportional to the change, independent of corpus size.
@@ -88,16 +92,20 @@ What the others do better, to carry over:
 - C writes the fewest rows when a hub fans out (no queue rows); B's queue writes are the price of
   durability of the to-do list.
 
-### Shared weaknesses to fix in the real implementation
+### Shared weaknesses, and their status in `webrun-builder`
 
-1. **Cold builds are ~12× slower than full recompute** in all three — one commit per task.
-   → group commit (a batch of a cell's tasks per commit; a crash loses at most a batch).
+1. **Cold builds cost more than a full recompute** (per-task bookkeeping). Measured first at
+   ~12×; most of that was the lab's `MemKV` (O(n) sorted-array inserts — now a blocked sorted
+   list) and one commit per task. R adds group commit (a batch of a cell's tasks per commit; a
+   crash loses at most a batch): 5× fewer commits, ~2.3× a full recompute on MemKV. **Done.**
 2. **Reduce cells re-list their whole input** on any change. → incremental reduce
-   (fold over the changed keys with the previous accumulator), or keyed group-by.
+   (fold over the changed keys with the previous accumulator), or keyed group-by. **Open.**
 3. **Single writer per store**: the queue-token re-check (B) and stamp/revision counters (A, C) rely
    on an in-process lock. Multi-process use needs a conditional delete from storage (SQL can).
+   **Open** (documented: one engine per store).
 4. **Ownership hand-over** within one run (task X stops emitting a row that task Y starts emitting,
-   Y runs first) fails Y in A/B/C where P0 accepts it — not covered by the suite yet.
+   Y runs first) fails Y in A/B/C where P0 accepts it — not covered by the suite yet. **Open**
+   (documented; Y is retried).
 
 Contract points surfaced by the prototype authors: `pending` is true only for interruption (not for
 dead letters); a reduce cell runs once even over empty inputs (P0 semantics).

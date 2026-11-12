@@ -391,13 +391,13 @@ importers:
 
   packages/webrun-build-lab:
     dependencies:
+      '@statewalker/webrun-builder':
+        specifier: workspace:^
+        version: link:../webrun-builder
       '@statewalker/webrun-dataflow':
         specifier: workspace:^
         version: link:../webrun-dataflow
     devDependencies:
-      '@statewalker/webrun-cells':
-        specifier: workspace:^
-        version: link:../webrun-cells
       '@statewalker/webrun-files-sqlite':
         specifier: 'catalog:'
         version: 0.10.3
@@ -426,6 +426,12 @@ importers:
       '@statewalker/webrun-files-mem':
         specifier: 'catalog:'
         version: 0.10.3
+      '@statewalker/webrun-files-sqlite':
+        specifier: 'catalog:'
+        version: 0.10.3
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.4
       rimraf:
         specifier: 'catalog:'
         version: 6.1.3
@@ -466,31 +472,6 @@ importers:
       playwright:
         specifier: 'catalog:'
         version: 1.63.0
-      rimraf:
-        specifier: 'catalog:'
-        version: 6.1.3
-      tsdown:
-        specifier: 'catalog:'
-        version: 0.23.0(tsx@4.23.15)(typescript@7.0.2)
-      typescript:
-        specifier: 'catalog:'
-        version: 7.0.2
-      vitest:
-        specifier: 'catalog:'
-        version: 5.0.3(@types/node@26.6.4)(@vitest/coverage-v8@5.0.3)(vite@8.3.2(@types/node@26.6.4)(esbuild@0.28.2)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
-
-  packages/webrun-cells:
-    dependencies:
-      '@statewalker/webrun-dataflow':
-        specifier: workspace:^
-        version: link:../webrun-dataflow
-      '@statewalker/webrun-files-sqlite':
-        specifier: 'catalog:'
-        version: 0.10.3
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 26.6.4
       rimraf:
         specifier: 'catalog:'
         version: 6.1.3
@@ -588,9 +569,6 @@ importers:
       '@statewalker/webrun-builder':
         specifier: workspace:^
         version: link:../webrun-builder
-      '@statewalker/webrun-dataflow':
-        specifier: workspace:^
-        version: link:../webrun-dataflow
       '@statewalker/webrun-files':
         specifier: 'catalog:'
         version: 0.10.2
