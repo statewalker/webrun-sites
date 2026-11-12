@@ -155,6 +155,48 @@ describe("document index — updates and deletes", () => {
 });
 
 describe("document index — configurable persistence", () => {
+  it("autoFlush: false defers index saves to flush(); a crash before it is recovered", async () => {
+    const { files } = await corpus(3, 6);
+    const state = new MemFilesApi();
+    const persistence = new FilesIndexerPersistence(state, "/index");
+    let saves = 0;
+    const counting = {
+      save: (entries: Parameters<typeof persistence.save>[0]) => {
+        saves++;
+        return persistence.save(entries);
+      },
+      load: () => persistence.load(),
+    };
+    const make = () => {
+      const c = counted({ files });
+      c.opts.persistence = { kind: "files", files: state, path: "/engine" };
+      c.opts.indexPersistence = counting;
+      c.opts.autoFlush = false;
+      return c;
+    };
+    const first = make();
+    const index = await openDocumentIndex(first.opts);
+    await index.update();
+    await tick();
+    await writeText(files, "/library/doc0001.pdf", "another text");
+    await index.update();
+    expect(saves).toBe(0);
+    await index.flush();
+    expect(saves).toBe(1);
+
+    // Changes after the last flush, then the process dies: the next process rebuilds.
+    await tick();
+    await writeText(files, "/library/doc0002.pdf", "unflushed words");
+    await index.update();
+    const second = make();
+    const reopened = await openDocumentIndex(second.opts);
+    await reopened.update();
+    expect(second.calls.embed).toBe(0);
+    expect((await reopened.search("unflushed words", { mode: "fulltext" }))[0]?.path).toBe(
+      "doc0002.pdf",
+    );
+  });
+
   it("rewrites the persisted index only when an update changed it", async () => {
     const { files } = await corpus(3, 6);
     const state = new MemFilesApi();

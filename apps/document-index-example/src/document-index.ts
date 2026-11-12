@@ -69,6 +69,14 @@ export interface DocumentIndexOptions {
   indexPersistence?: IndexerPersistence;
   /** Concurrent tasks per batch, e.g. parallel embedding calls (default 4). */
   concurrency?: number;
+  /**
+   * Save the search index at the end of every `update()` that changed it
+   * (default true). With `false`, call `flush()` yourself — e.g. on a timer —
+   * since statewalker-search rewrites the whole index on each save; a crash
+   * before the flush is recovered by rebuilding the index from the engine
+   * state (no re-extraction, no re-embedding).
+   */
+  autoFlush?: boolean;
   /** Test hook: throw after the engine run, before the index flush. */
   crashBeforeIndexFlush?: boolean;
 }
@@ -90,8 +98,10 @@ export interface UpdateReport {
 }
 
 export interface DocumentIndex {
-  /** Scan the folder, run the pipeline to convergence, flush the search index. */
+  /** Scan the folder, run the pipeline to convergence, flush the search index (`autoFlush`). */
   update(): Promise<UpdateReport>;
+  /** Save the search index if it changed since the last save. */
+  flush(): Promise<void>;
   search(
     query: string,
     opts?: { topK?: number; mode?: "hybrid" | "fulltext" | "vector" },
@@ -261,9 +271,15 @@ export async function openDocumentIndex(opts: DocumentIndexOptions): Promise<Doc
       await engine.put(SYS, "index-dirty", true);
       const stats = await engine.run();
       if (opts.crashBeforeIndexFlush) throw new Error("simulated crash before the index flush");
+      if (opts.autoFlush ?? true) await flushIndex();
+      // Clean once nothing is left unsaved (with autoFlush: false, after flush()).
+      if (!touched) await engine.remove(SYS, "index-dirty");
+      return { scanned, executed: stats.executed, failed: stats.failed };
+    },
+
+    async flush() {
       await flushIndex();
       await engine.remove(SYS, "index-dirty");
-      return { scanned, executed: stats.executed, failed: stats.failed };
     },
 
     async search(query, { topK = 10, mode = "hybrid" } = {}) {

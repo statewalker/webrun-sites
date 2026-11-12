@@ -50,8 +50,9 @@ pnpm tsx bench/static.ts 2000  # B vs the existing webrun-cells, both on SQLite
   20 sources × 1 000 keys with a 1 % edit.
 
 One finding: within one batch of writes, "remove a row, then put back its old value" is a net
-no-op. The eager queue (B, R) still re-runs the dependents — they cut off at once, so results are
-correct — while A and C can skip them. The random-graph rounds therefore apply one edit per row;
+no-op. Prototype B still re-runs the dependents — they cut off at once, so results are correct —
+while A and C can skip them. The real engine (R) now verifies read fingerprints before executing
+and skips them too. The random-graph rounds therefore apply one edit per row;
 the crash-storm phases keep the net no-ops and check correctness.
 
 The suite is discriminating: each of 8 deliberate bugs injected into B (no reverse deps, no value
@@ -126,13 +127,19 @@ What the others do better, to carry over:
    list) and one commit per task. R adds group commit (a batch of a cell's tasks per commit; a
    crash loses at most a batch): 5× fewer commits, ~2.3× a full recompute on MemKV. **Done.**
 2. **Reduce cells re-list their whole input** on any change. → incremental reduce
-   (fold over the changed keys with the previous accumulator), or keyed group-by. **Open.**
+   (fold over the changed keys with the previous accumulator), or keyed group-by. **Done:**
+   `incremental: true` reduce cells get `ctx.changes()` (current + previous values) and `ctx.state`.
 3. **Single writer per store**: the queue-token re-check (B) and stamp/revision counters (A, C) rely
    on an in-process lock. Multi-process use needs a conditional delete from storage (SQL can).
-   **Open** (documented: one engine per store).
+   **Done:** per-write conditions in the KV port (`ifValue`), conditional dequeue, and leases with
+   `shared: true` (SQLite across processes).
 4. **Ownership hand-over** within one run (task X stops emitting a row that task Y starts emitting,
-   Y runs first) fails Y in A/B/C where P0 accepts it — not covered by the suite yet. **Open**
-   (documented; Y is retried).
+   Y runs first) fails Y in A/B/C where P0 accepts it. **Done:** Y may take over a row whose owner
+   is queued (stale).
+
+5. **Net no-op re-runs** and a **race** found while analysing them (a `put` landing while a task
+   runs, on a row it read dynamically, was lost). **Done:** verify-before-execute (read
+   fingerprints in the trace) and re-checking dynamic source reads at commit when a write landed.
 
 Contract points surfaced by the prototype authors: `pending` is true only for interruption (not for
 dead letters); a reduce cell runs once even over empty inputs (P0 semantics).

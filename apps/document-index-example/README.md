@@ -37,6 +37,7 @@ const hits = await index.search("perovskite tandem cells", { topK: 10 });
 | `persistence` | `{ kind: "memory" }` | engine state: `memory`, `files`, `sql`, `custom` |
 | `indexPersistence` | none (in memory) | any statewalker-search `IndexerPersistence`; `FilesIndexerPersistence` stores it in a `FilesApi` |
 | `concurrency` | 4 | tasks run concurrently, e.g. parallel embedding calls |
+| `autoFlush` | `true` | save the search index after each `update()` that changed it; `false`: call `flush()` yourself (statewalker-search rewrites the whole index on each save) |
 
 `hashingEmbedder(dim)` is a deterministic bag-of-words embedder for demos and tests; use a real model
 in production.

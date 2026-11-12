@@ -1,4 +1,4 @@
-import { emptyMetrics, type KV, type KvMetrics } from "./kv.js";
+import { emptyMetrics, type KV, type KvMetrics, type KvWrite } from "./kv.js";
 
 /**
  * The SQL port this store needs — structurally the `SqlDriver` of
@@ -75,22 +75,44 @@ export class SqlKV implements KV {
     }
   }
 
-  async commit(writes: ReadonlyArray<{ key: string; value?: string }>): Promise<void> {
+  async commit(writes: ReadonlyArray<KvWrite>): Promise<boolean[]> {
     await this.#init();
     this.metrics.commits++;
-    const statements = writes.map(({ key, value }) => {
+    const t = this.table;
+    const statements = writes.map(({ key, value, ifValue }) => {
       if (value === undefined) {
         this.metrics.rowsDeleted++;
-        return { sql: `DELETE FROM ${this.table} WHERE key = ?`, params: [key] };
+        if (ifValue === undefined) return { sql: `DELETE FROM ${t} WHERE key = ?`, params: [key] };
+        if (ifValue === null) return { sql: "SELECT 1 WHERE 0", params: [] }; // absent already
+        return { sql: `DELETE FROM ${t} WHERE key = ? AND value = ?`, params: [key, ifValue] };
       }
       this.metrics.rowsWritten++;
       this.metrics.bytesWritten += key.length + value.length;
+      if (ifValue === undefined) {
+        return {
+          sql: `INSERT INTO ${t} (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
+          params: [key, value],
+        };
+      }
+      if (ifValue === null) {
+        return {
+          sql: `INSERT INTO ${t} (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING`,
+          params: [key, value],
+        };
+      }
       return {
-        sql: `INSERT INTO ${this.table} (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
-        params: [key, value],
+        sql: `UPDATE ${t} SET value = ? WHERE key = ? AND value = ?`,
+        params: [value, key, ifValue],
       };
     });
-    if (statements.length > 0) await this.db.transaction(statements);
+    if (statements.length === 0) return [];
+    const counts = await this.db.transaction(statements);
+    // Unconditional writes always apply; a delete-if-absent "applies" as a no-op.
+    return writes.map((w, i) =>
+      w.ifValue === undefined || (w.ifValue === null && w.value === undefined)
+        ? true
+        : (counts[i] ?? 0) > 0,
+    );
   }
 
   resetMetrics(): void {

@@ -61,4 +61,16 @@ export function errorText(error: unknown): string {
  * The static signal-level topology (order, ranks, readers, validation) — the
  * same one the real engine uses, so prototypes schedule identically.
  */
-export { Topology } from "@statewalker/webrun-builder";
+import { Topology as EngineTopology } from "@statewalker/webrun-builder";
+import type { CellDef } from "./types.js";
+
+/** The engine's topology, typed with the lab's cell contract (no incremental reduce). */
+export class Topology extends EngineTopology {
+  constructor(cells: readonly CellDef[]) {
+    super(cells as unknown as ConstructorParameters<typeof EngineTopology>[0]);
+  }
+
+  override cell(id: string): CellDef {
+    return super.cell(id) as unknown as CellDef;
+  }
+}

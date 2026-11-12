@@ -6,7 +6,7 @@
   "description": "Exploration lab: alternative incremental build engine prototypes, a shared conformance suite and a benchmark harness.",
   "license": "MIT",
   "scripts": {
-    "test": "vitest run",
+    "test": "vitest run && MASSIVE_SCALE=0.3 vitest run --config vitest.massive.config.ts",
     "test:watch": "vitest",
     "bench": "tsx bench/run.ts",
     "typecheck": "tsc --noEmit",

@@ -13,39 +13,48 @@
  *   keyed by the signal, the reduce task of cells aggregating it, tasks that
  *   read that exact row (`x/` index) and tasks that listed the signal (`xl/`).
  * - **The queue is keyed by topological rank**, so the first queue row is
- *   always the most upstream work. `run()` takes a batch of the first cell's
+ *   always the most upstream work. `run()` claims a batch of the first cell's
  *   tasks (a cell never reads its own outputs, so they are independent),
  *   executes them, and commits the batch atomically. A task never runs while a
  *   more upstream cell has queued work: a diamond's join runs once.
+ * - **Verify before execute.** A task's trace keeps a hash of every row it
+ *   read. A queued map task whose reads all hash as before (a change undone
+ *   before the run: remove + put back) is dequeued without running.
  * - **A commit** holds, per task: changed outputs plus the dependents they
- *   queue, retractions of outputs no longer emitted, the task's trace (reads,
- *   outputs) and reverse-index diff, the dequeue and the dead-letter clean-up.
- *   A crash loses at most the batch being committed; the queue is the durable
- *   to-do list. No work is proportional to the corpus: a no-op run is one empty
- *   queue scan.
- * - **A change landing while a task runs survives** its commit: queue rows
- *   carry a token, and the dequeue happens only if the token is still the
- *   claimed one. The store has no compare-and-set, so the re-check and the
- *   commit run under an in-process lock shared with `put`/`remove`: one engine
- *   per store at a time.
+ *   queue, retractions of outputs no longer emitted, the trace (reads with
+ *   hashes, outputs, state) and reverse-index diff, the dequeue and the
+ *   dead-letter clean-up. A crash loses at most the batch being committed; the
+ *   queue is the durable to-do list. A no-op run is one empty queue scan.
+ * - **Concurrent writes are never lost.** The dequeue is conditional on the
+ *   queue row still holding the claimed value, so a change that re-queued the
+ *   task while it ran keeps it queued. A task that read source rows other than
+ *   its own key first registers those reads in the reverse index, then checks
+ *   they are unchanged before committing; a write landing in between finds the
+ *   registration and re-queues it.
+ * - **Several engines may share a store** (`shared: true`) whose writes support
+ *   conditions: claims are then leases (owner + expiry) taken with conditional
+ *   writes, so a task runs in one engine at a time and a crashed engine's
+ *   claims expire. Alone on a store, an engine claims without writing.
  *
  * KV layout (tuples joined with U+0001):
  *   r/<signal>/<key>                → <owner>\x02<canonical json>  (owner "" = source)
- *   q/<rank>/<cell>/<task>          → {"g": token, "a": attempts}
- *   f/<cell>/<task>                 → {"r": [[signal,key]…], "l": [signal…], "o": [[signal,key]…]}
+ *   q/<rank>/<cell>/<task>          → {"g": token, "a": attempts, "o"?: owner, "u"?: lease end, "z"?: 1 reset}
+ *   f/<cell>/<task>                 → {"r": reads, "l": lists, "o": outputs, "i"/"rh": read fingerprints, "s"?: state}
  *   x/<signal>/<key>/<cell>/<task>  → ""
  *   xl/<signal>/<cell>/<task>       → ""
+ *   c/<cell>/<signal>/<key>         → {"p": previous json | null, "g": token}  (incremental reduce)
  *   d/<cell>/<task>                 → {"attempts": n, "error": text}
  */
 import { canonicalJson } from "./canonical-json.js";
 import { k, kp, seqKey, split } from "./keys.js";
 import { type Logger, NULL_LOGGER } from "./logger.js";
-import type { KV } from "./store/kv.js";
+import type { KV, KvWrite } from "./store/kv.js";
 import { Topology } from "./topology.js";
 import {
   type BuildEngineOptions,
   type BuildStatus,
   type CellDef,
+  type Change,
   ConflictingEmission,
   type DeadLetter,
   type Json,
@@ -55,30 +64,56 @@ import {
   type TaskContext,
 } from "./types.js";
 
-type Write = { key: string; value?: string };
 type Ref = [signal: string, key: string];
 interface Trace {
   r: Ref[];
   l: string[];
   o: Ref[];
+  /** Map tasks: fingerprints of the own input rows, aligned with the cell's `inputs` ("-" = absent). */
+  i?: string[];
+  /** Fingerprints of the rows in `r`, aligned with it. */
+  rh?: string[];
+  s?: Json;
 }
 interface QueueRow {
   g: string;
   a: number;
+  o?: string;
+  u?: number;
+  z?: 1;
 }
 interface Claim {
   cell: string;
   task: string;
   qkey: string;
+  /** The queue row value as claimed (with our lease): the dequeue condition. */
+  raw: string;
   row: QueueRow;
 }
+type StoredRow = { owner: string; json: string };
 type Emitted = Map<string, { ref: Ref; json: string }>;
+interface Done {
+  claim: Claim;
+  kind: "done";
+  prev: Trace;
+  rawPrev?: string;
+  next?: Trace;
+  emitted: Emitted;
+  /** Change records consumed by an incremental reduce task: key → raw value. */
+  consumed: Map<string, string>;
+  /** Source rows read beyond the task's own key, validated before commit. */
+  validate: { ref: Ref; hash: string }[];
+  /** Source signals listed (not implied by the cell's inputs), validated before commit. */
+  validateLists: { signal: string; hash: string }[];
+}
 type Outcome =
-  | { claim: Claim; kind: "done"; prev: Trace; rawPrev?: string; next?: Trace; emitted: Emitted }
+  | Done
+  | { claim: Claim; kind: "skip" }
   | { claim: Claim; kind: "failed"; error: unknown };
 
 const OWNER_SEP = "\u0002";
 const EMPTY_TRACE: Trace = { r: [], l: [], o: [] };
+const ABSENT = "-";
 
 export class BuildEngine {
   readonly #kv: KV;
@@ -86,11 +121,18 @@ export class BuildEngine {
   readonly #maxAttempts: number;
   readonly #batchSize: number;
   readonly #concurrency: number;
+  readonly #leaseMs: number;
+  readonly #shared: boolean;
+  readonly #now: () => number;
+  readonly #owner: string;
   readonly #log: Logger;
   /** Signals some task may `list` with an `xl/` record (declared reads, map inputs). */
   readonly #listable: Set<string>;
-  readonly #id = Math.random().toString(36).slice(2, 10);
+  /** Incremental reduce cells by input signal. */
+  readonly #folders = new Map<string, string[]>();
   #tokens = 0;
+  /** Source writes (put/remove) made by this engine — a batch validates only if one landed meanwhile. */
+  #sourceWrites = 0;
   #lock: Promise<void> = Promise.resolve();
   #running = false;
 
@@ -100,10 +142,20 @@ export class BuildEngine {
     this.#maxAttempts = opts.maxAttempts ?? 3;
     this.#batchSize = Math.max(1, opts.batchSize ?? 64);
     this.#concurrency = Math.max(1, opts.concurrency ?? 1);
+    this.#leaseMs = opts.leaseMs ?? 30_000;
+    this.#shared = opts.shared ?? false;
+    this.#now = opts.now ?? Date.now;
+    this.#owner = opts.owner ?? Math.random().toString(36).slice(2, 10);
     this.#log = opts.logger ?? NULL_LOGGER;
     this.#listable = new Set(
       opts.cells.flatMap((c) => [...(c.reads ?? []), ...(c.kind === "reduce" ? [] : c.inputs)]),
     );
+    for (const c of opts.cells) {
+      if (!c.incremental) continue;
+      if (c.kind !== "reduce")
+        throw new Error(`Cell "${c.id}": only reduce cells can be incremental`);
+      for (const s of c.inputs) this.#folders.set(s, [...(this.#folders.get(s) ?? []), c.id]);
+    }
   }
 
   // ---- rows ---------------------------------------------------------------
@@ -115,10 +167,11 @@ export class BuildEngine {
     return this.#locked(async () => {
       const stored = await this.#row(signal, key);
       if (stored?.json === json) return false;
-      const writes = new Map<string, Write>();
+      const writes = new Map<string, KvWrite>();
       set(writes, k("r", signal, key), `${OWNER_SEP}${json}`);
-      await this.#enqueueDependents(signal, key, writes);
+      await this.#enqueueDependents(signal, key, stored?.json, writes);
       await this.#kv.commit([...writes.values()]);
+      this.#sourceWrites++;
       return true;
     });
   }
@@ -127,11 +180,13 @@ export class BuildEngine {
   async remove(signal: string, key: string): Promise<boolean> {
     this.#topo.assertSource(signal);
     return this.#locked(async () => {
-      if ((await this.#row(signal, key)) === undefined) return false;
-      const writes = new Map<string, Write>();
+      const stored = await this.#row(signal, key);
+      if (stored === undefined) return false;
+      const writes = new Map<string, KvWrite>();
       set(writes, k("r", signal, key), undefined);
-      await this.#enqueueDependents(signal, key, writes);
+      await this.#enqueueDependents(signal, key, stored.json, writes);
       await this.#kv.commit([...writes.values()]);
+      this.#sourceWrites++;
       return true;
     });
   }
@@ -181,19 +236,22 @@ export class BuildEngine {
 
   /**
    * Queue every task of `cell` — e.g. after its code changed. Downstream tasks
-   * re-run only where its outputs actually change.
+   * re-run only where its outputs actually change. An incremental reduce
+   * starts again from an empty state.
    */
   async invalidate(cell: string): Promise<void> {
     const def = this.#topo.cell(cell);
-    const writes = new Map<string, Write>();
+    const writes = new Map<string, KvWrite>();
+    // `z`: skip verification (the code changed, not the inputs) and reset state.
+    const row = () => JSON.stringify({ g: this.#token(), a: 0, z: 1 } satisfies QueueRow);
     if (def.kind === "reduce") {
-      set(writes, this.#qkey(cell, "*"), this.#qrow());
+      set(writes, this.#qkey(cell, "*"), row());
     } else {
       for (const s of def.inputs) {
-        for (const key of await this.keys(s)) set(writes, this.#qkey(cell, key), this.#qrow());
+        for (const key of await this.keys(s)) set(writes, this.#qkey(cell, key), row());
       }
       for await (const [fkey] of this.#kv.scan(kp("f", cell))) {
-        set(writes, this.#qkey(cell, split(fkey)[2] as string), this.#qrow());
+        set(writes, this.#qkey(cell, split(fkey)[2] as string), row());
       }
     }
     if (writes.size > 0) await this.#locked(() => this.#kv.commit([...writes.values()]));
@@ -224,20 +282,24 @@ export class BuildEngine {
   }
 
   async #run(opts?: RunOptions): Promise<RunStats> {
-    const stats: RunStats = { executed: 0, failed: 0, deadLettered: 0, pending: false };
+    const stats: RunStats = { executed: 0, skipped: 0, failed: 0, deadLettered: 0, pending: false };
     const budget = opts?.maxTasks ?? Number.POSITIVE_INFINITY;
     await this.#seedReducers();
     let tasks = 0;
     for (;;) {
       if (opts?.signal?.aborted || tasks >= budget) {
-        stats.pending = (await this.#nextBatch(1)).length > 0;
+        stats.pending = (await this.#peekQueue()) !== undefined;
         return stats;
       }
-      const batch = await this.#nextBatch(Math.min(this.#batchSize, budget - tasks));
-      if (batch.length === 0) return stats;
-      tasks += batch.length;
-      const outcomes = await this.#executeAll(batch);
-      await this.#commitBatch(outcomes, stats);
+      const { claims, blocked } = await this.#claimBatch(Math.min(this.#batchSize, budget - tasks));
+      if (claims.length === 0) {
+        stats.pending = blocked;
+        return stats;
+      }
+      tasks += claims.length;
+      const writesBefore = this.#sourceWrites;
+      const outcomes = await this.#executeAll(claims);
+      await this.#commitBatch(outcomes, stats, writesBefore);
     }
   }
 
@@ -254,17 +316,50 @@ export class BuildEngine {
     return out;
   }
 
-  /** The queued tasks of the most upstream cell that has any. */
-  async #nextBatch(limit: number): Promise<Claim[]> {
-    const out: Claim[] = [];
+  async #peekQueue(): Promise<string | undefined> {
+    for await (const [qkey] of this.#kv.scan(kp("q"), { limit: 1 })) return qkey;
+    return undefined;
+  }
+
+  /**
+   * Claim (lease) up to `limit` queued tasks of the most upstream cell that has
+   * any. `blocked` when that cell's work is all leased by other engines.
+   */
+  async #claimBatch(limit: number): Promise<{ claims: Claim[]; blocked: boolean }> {
+    const now = this.#now();
+    const candidates: { cell: string; task: string; qkey: string; raw: string; row: QueueRow }[] =
+      [];
     let cell: string | undefined;
-    for await (const [qkey, raw] of this.#kv.scan(kp("q"), { limit })) {
+    let leasedByOthers = false;
+    for await (const [qkey, raw] of this.#kv.scan(kp("q"))) {
       const [, , c, task] = split(qkey) as [string, string, string, string];
       if (cell === undefined) cell = c;
       else if (c !== cell) break;
-      out.push({ cell: c, task, qkey, row: JSON.parse(raw) as QueueRow });
+      const row = JSON.parse(raw) as QueueRow;
+      if (row.o !== undefined && row.o !== this.#owner && (row.u ?? 0) > now) {
+        leasedByOthers = true;
+        continue;
+      }
+      candidates.push({ cell: c, task, qkey, raw, row });
+      if (candidates.length >= limit) break;
     }
-    return out;
+    if (candidates.length === 0) return { claims: [], blocked: leasedByOthers };
+    // Alone on the store: no lease to take; the dequeue stays conditional.
+    if (!this.#shared) return { claims: candidates, blocked: false };
+    const leased = candidates.map((c) =>
+      JSON.stringify({ ...c.row, o: this.#owner, u: now + this.#leaseMs } satisfies QueueRow),
+    );
+    const applied = await this.#kv.commit(
+      candidates.map((c, i) => ({ key: c.qkey, value: leased[i] as string, ifValue: c.raw })),
+    );
+    const claims: Claim[] = [];
+    candidates.forEach((c, i) => {
+      if (applied[i]) {
+        claims.push({ ...c, raw: leased[i] as string, row: JSON.parse(leased[i] as string) });
+      }
+    });
+    // Rows lost to a race (re-queued or claimed meanwhile) are simply retried.
+    return { claims, blocked: claims.length === 0 };
   }
 
   /** A reduce cell runs at least once, even over empty inputs. */
@@ -272,11 +367,8 @@ export class BuildEngine {
     for (const id of this.#topo.order) {
       if (this.#topo.cell(id).kind !== "reduce") continue;
       if ((await this.#kv.get(k("f", id, "*"))) !== undefined) continue;
-      if ((await this.#kv.get(this.#qkey(id, "*"))) !== undefined) continue;
       if ((await this.#kv.get(k("d", id, "*"))) !== undefined) continue;
-      await this.#locked(() =>
-        this.#kv.commit([{ key: this.#qkey(id, "*"), value: this.#qrow() }]),
-      );
+      await this.#kv.commit([{ key: this.#qkey(id, "*"), value: this.#qrow(), ifValue: null }]);
     }
   }
 
@@ -284,16 +376,34 @@ export class BuildEngine {
     return k("q", seqKey(this.#topo.rank.get(cell) as number), cell, task);
   }
 
-  #qrow(attempts = 0): string {
-    return JSON.stringify({ g: `${this.#id}.${++this.#tokens}`, a: attempts });
+  #token(): string {
+    return `${this.#owner}.${++this.#tokens}`;
   }
 
-  /** Queue every task that depends on row (signal, key). */
-  async #enqueueDependents(signal: string, key: string, writes: Map<string, Write>): Promise<void> {
+  #qrow(): string {
+    return JSON.stringify({ g: this.#token(), a: 0 } satisfies QueueRow);
+  }
+
+  /**
+   * Queue every task that depends on row (signal, key), whose value before
+   * this change was `previous`; for incremental reducers, also record it.
+   */
+  async #enqueueDependents(
+    signal: string,
+    key: string,
+    previous: string | undefined,
+    writes: Map<string, KvWrite>,
+  ): Promise<void> {
     for (const id of this.#topo.readersOf(signal)) {
       const cell = this.#topo.cell(id);
       if (!cell.inputs.includes(signal)) continue;
       set(writes, this.#qkey(id, cell.kind === "reduce" ? "*" : key), this.#qrow());
+    }
+    for (const id of this.#folders.get(signal) ?? []) {
+      // Keep the value at the reducer's last run: only the first change records it.
+      const ckey = k("c", id, signal, key);
+      if (writes.has(ckey) || (await this.#kv.get(ckey)) !== undefined) continue;
+      set(writes, ckey, JSON.stringify({ p: previous ?? null, g: this.#token() }));
     }
     for await (const [xkey] of this.#kv.scan(kp("x", signal, key))) {
       const [, , , cell, task] = split(xkey) as [string, string, string, string, string];
@@ -312,74 +422,121 @@ export class BuildEngine {
     const cell = this.#topo.cell(claim.cell);
     const rawPrev = await this.#kv.get(k("f", claim.cell, claim.task));
     const prev: Trace = rawPrev ? (JSON.parse(rawPrev) as Trace) : EMPTY_TRACE;
+    const reset = claim.row.z === 1;
+    /** Rows fetched for this task (verification and `ctx.get` share them). */
+    const cache = new Map<string, StoredRow | undefined>();
+    const fetch = async (signal: string, key: string) => {
+      const id = k(signal, key);
+      if (!cache.has(id)) cache.set(id, await this.#row(signal, key));
+      return cache.get(id);
+    };
     try {
-      if (cell.kind !== "reduce" && !(await this.#alive(cell, claim.task))) {
-        // Dead task: clean up side effects, then retract (in the commit).
-        await cell.dispose?.(
-          claim.task,
-          prev.o.map(([signal, key]) => ({ signal, key })),
-        );
-        return { claim, kind: "done", prev, rawPrev, emitted: new Map() };
-      }
-      const reads = new Map<string, Ref>();
-      const lists = new Set<string>();
-      const emitted: Emitted = new Map();
-      await cell.run(this.#context(cell, claim.task, reads, lists, emitted));
-      const self = k(claim.cell, claim.task);
-      for (const { ref } of emitted.values()) {
-        const row = await this.#row(ref[0], ref[1]);
-        if (row && row.owner !== "" && row.owner !== self) {
-          throw new ConflictingEmission(
-            `${ref[0]}/${ref[1]}: already emitted by ${split(row.owner).join("/")}`,
+      if (cell.kind !== "reduce") {
+        let alive = false;
+        for (const s of cell.inputs) if ((await fetch(s, claim.task)) !== undefined) alive = true;
+        if (!alive) {
+          // Dead task: clean up side effects, then retract (in the commit).
+          await cell.dispose?.(
+            claim.task,
+            prev.o.map(([signal, key]) => ({ signal, key })),
           );
+          return this.#done(claim, prev, rawPrev, undefined, new Map(), new Map(), [], []);
+        }
+        if (!reset && prev.i && prev.rh && (await this.#unchanged(cell, claim.task, prev, fetch))) {
+          return { claim, kind: "skip" };
         }
       }
-      const next: Trace = {
-        r: [...reads.values()],
-        l: [...lists],
-        o: [...emitted.values()].map((e) => e.ref),
-      };
-      return { claim, kind: "done", prev, rawPrev, next, emitted };
+      return await this.#runTask(cell, claim, prev, rawPrev, reset, fetch);
     } catch (error) {
       return { claim, kind: "failed", error };
     }
   }
 
-  /** A map task is alive while its key exists on at least one input signal. */
-  async #alive(cell: CellDef, key: string): Promise<boolean> {
-    for (const s of cell.inputs)
-      if ((await this.#kv.get(k("r", s, key))) !== undefined) return true;
-    return false;
+  /** Whether every row the task read last time (own inputs first) is unchanged. */
+  async #unchanged(
+    cell: CellDef,
+    task: string,
+    prev: Trace,
+    fetch: (signal: string, key: string) => Promise<StoredRow | undefined>,
+  ): Promise<boolean> {
+    const fp = (row: StoredRow | undefined) => (row === undefined ? ABSENT : fingerprint(row.json));
+    if (prev.i?.length !== cell.inputs.length || prev.rh?.length !== prev.r.length) return false;
+    for (let j = 0; j < cell.inputs.length; j++) {
+      if (fp(await fetch(cell.inputs[j] as string, task)) !== prev.i[j]) return false;
+    }
+    for (let j = 0; j < prev.r.length; j++) {
+      const [signal, key] = prev.r[j] as Ref;
+      if (fp(await fetch(signal, key)) !== prev.rh[j]) return false;
+    }
+    return true;
   }
 
-  #context(
+  async #runTask(
     cell: CellDef,
-    taskKey: string,
-    reads: Map<string, Ref>,
-    lists: Set<string>,
-    emitted: Emitted,
-  ): TaskContext {
+    claim: Claim,
+    prev: Trace,
+    rawPrev: string | undefined,
+    reset: boolean,
+    fetch: (signal: string, key: string) => Promise<StoredRow | undefined>,
+  ): Promise<Outcome> {
+    const taskKey = claim.task;
     const readable = new Set([...cell.inputs, ...(cell.reads ?? [])]);
     const isMap = cell.kind !== "reduce";
+    const reads = new Map<string, Ref>();
+    const hashes: Record<string, string> = {};
+    const lists = new Set<string>();
+    const emitted: Emitted = new Map();
+    const validate: Done["validate"] = [];
+    const validateLists: Done["validateLists"] = [];
+    let state = reset ? undefined : prev.s;
+    // Incremental reduce: snapshot the change records now; the commit removes exactly these.
+    const consumed = new Map<string, string>();
+    const changes = new Map<string, { key: string; previous: string | null }[]>();
+    if (cell.incremental) {
+      for await (const [ckey, raw] of this.#kv.scan(kp("c", cell.id))) {
+        const [, , signal, key] = split(ckey) as [string, string, string, string];
+        consumed.set(ckey, raw);
+        const list = changes.get(signal) ?? [];
+        list.push({ key, previous: (JSON.parse(raw) as { p: string | null }).p });
+        changes.set(signal, list);
+      }
+    }
     const check = (signal: string) => {
       if (!readable.has(signal)) throw new Error(`Cell "${cell.id}" read undeclared "${signal}"`);
     };
-    return {
+    const incrementalOnly = (what: string) => {
+      if (!cell.incremental)
+        throw new Error(`Cell "${cell.id}": ${what} needs an incremental reduce cell`);
+    };
+    const ctx: TaskContext = {
       key: taskKey,
       get: async (signal, key) => {
         check(signal);
+        const own = isMap && key === taskKey && cell.inputs.includes(signal);
+        const row = await fetch(signal, key);
+        const hash = row === undefined ? ABSENT : fingerprint(row.json);
+        hashes[k(signal, key)] = hash;
         // A map task's own input rows are covered by key-triggering.
-        if (!(isMap && key === taskKey && cell.inputs.includes(signal))) {
+        if (!own) {
           reads.set(k(signal, key), [signal, key]);
+          if (!this.#topo.derived.has(signal)) validate.push({ ref: [signal, key], hash });
         }
-        const row = await this.#row(signal, key);
         return row === undefined ? undefined : (JSON.parse(row.json) as Json);
       },
       list: async (signal) => {
         check(signal);
+        const rows = await this.list(signal);
         // A reduce cell's inputs are covered by signal-triggering.
-        if (!(cell.kind === "reduce" && cell.inputs.includes(signal))) lists.add(signal);
-        return this.list(signal);
+        if (!(cell.kind === "reduce" && cell.inputs.includes(signal))) {
+          lists.add(signal);
+          if (!this.#topo.derived.has(signal)) {
+            validateLists.push({
+              signal,
+              hash: fingerprint(canonicalJson(rows as unknown as Json)),
+            });
+          }
+        }
+        return rows;
       },
       emit: (signal, key, value) => {
         if (!cell.outputs.includes(signal)) {
@@ -393,15 +550,132 @@ export class BuildEngine {
         }
         emitted.set(id, { ref: [signal, key], json });
       },
+      get state() {
+        incrementalOnly("ctx.state");
+        return state;
+      },
+      setState: (value) => {
+        incrementalOnly("ctx.setState");
+        canonicalJson(value);
+        state = value;
+      },
+      changes: async (signal) => {
+        incrementalOnly("ctx.changes");
+        if (!cell.inputs.includes(signal)) {
+          throw new Error(`Cell "${cell.id}": changes() of "${signal}", which is not an input`);
+        }
+        const out: Change[] = [];
+        for (const c of changes.get(signal) ?? []) {
+          const row = await this.#row(signal, c.key);
+          out.push({
+            key: c.key,
+            value: row === undefined ? undefined : (JSON.parse(row.json) as Json),
+            previous: c.previous === null ? undefined : (JSON.parse(c.previous) as Json),
+          });
+        }
+        return out;
+      },
     };
+    await cell.run(ctx);
+    // A map task depends on its own input rows whether or not it read them.
+    if (isMap) {
+      for (const s of cell.inputs) {
+        const row = await fetch(s, taskKey);
+        hashes[k(s, taskKey)] = row === undefined ? ABSENT : fingerprint(row.json);
+      }
+    }
+    const self = k(claim.cell, claim.task);
+    for (const { ref } of emitted.values()) {
+      const row = await this.#row(ref[0], ref[1]);
+      if (row && row.owner !== "" && row.owner !== self && !(await this.#stale(row.owner))) {
+        throw new ConflictingEmission(
+          `${ref[0]}/${ref[1]}: already emitted by ${split(row.owner).join("/")}`,
+        );
+      }
+    }
+    const next: Trace = {
+      r: [...reads.values()],
+      l: [...lists],
+      o: [...emitted.values()].map((e) => e.ref),
+      ...(isMap ? { i: cell.inputs.map((s) => hashes[k(s, taskKey)] as string) } : {}),
+      rh: [...reads.keys()].map((id) => hashes[id] as string),
+      ...(cell.incremental && state !== undefined ? { s: state } : {}),
+    };
+    return this.#done(claim, prev, rawPrev, next, emitted, consumed, validate, validateLists);
+  }
+
+  #done(
+    claim: Claim,
+    prev: Trace,
+    rawPrev: string | undefined,
+    next: Trace | undefined,
+    emitted: Emitted,
+    consumed: Map<string, string>,
+    validate: Done["validate"],
+    validateLists: Done["validateLists"],
+  ): Done {
+    return { claim, kind: "done", prev, rawPrev, next, emitted, consumed, validate, validateLists };
+  }
+
+  /** An owner task that is itself queued is stale: it may let go of the row when it runs. */
+  async #stale(owner: string): Promise<boolean> {
+    const [cell, task] = split(owner) as [string, string];
+    if (!this.#topo.cells.has(cell)) return true;
+    return (await this.#kv.get(this.#qkey(cell, task))) !== undefined;
+  }
+
+  /**
+   * For tasks that read source rows beyond their own key: check those rows are
+   * unchanged. Shared stores first register the new reverse-index entries: a
+   * write from another engine landing before the registration is caught by the
+   * check; one landing after finds the registration and re-queues the task.
+   * Returns false if stale.
+   */
+  async #validate(o: Done): Promise<boolean> {
+    if (o.validate.length === 0 && o.validateLists.length === 0) return true;
+    if (this.#shared) await this.#register(o);
+    for (const { ref, hash } of o.validate) {
+      const row = await this.#row(ref[0], ref[1]);
+      if ((row === undefined ? ABSENT : fingerprint(row.json)) !== hash) return false;
+    }
+    for (const { signal, hash } of o.validateLists) {
+      if (fingerprint(canonicalJson((await this.list(signal)) as unknown as Json)) !== hash) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /** Commit the task's new reverse-index entries for source reads ahead of its results. */
+  async #register(o: Done): Promise<void> {
+    const { cell, task } = o.claim;
+    const had = new Set(o.prev.r.map((r) => k(r[0], r[1])));
+    const hadLists = new Set(o.prev.l);
+    const register: KvWrite[] = [];
+    for (const { ref } of o.validate) {
+      if (!had.has(k(ref[0], ref[1])))
+        register.push({ key: k("x", ref[0], ref[1], cell, task), value: "" });
+    }
+    for (const { signal } of o.validateLists) {
+      if (!hadLists.has(signal)) register.push({ key: k("xl", signal, cell, task), value: "" });
+    }
+    if (register.length > 0) await this.#kv.commit(register);
   }
 
   /** Commit a batch of outcomes in one store transaction. */
-  async #commitBatch(outcomes: Outcome[], stats: RunStats): Promise<void> {
+  async #commitBatch(outcomes: Outcome[], stats: RunStats, writesBefore: number): Promise<void> {
     await this.#locked(async () => {
-      const writes = new Map<string, Write>();
+      // Reads can only have gone stale if a source write landed while the batch
+      // ran: in this engine (counted; none can land now, they take this lock) or
+      // in another engine sharing the store. Stale results stay queued.
+      const racy = this.#shared || this.#sourceWrites !== writesBefore;
+      const valid = new Set<Outcome>();
+      for (const o of outcomes) {
+        if (o.kind !== "done" || !racy || (await this.#validate(o))) valid.add(o);
+      }
+      const writes = new Map<string, KvWrite>();
       // Rows written earlier in this batch shadow the stored ones.
-      const overlay = new Map<string, { owner: string; json: string } | null>();
+      const overlay = new Map<string, StoredRow | null>();
       const row = async (signal: string, key: string) => {
         const id = k(signal, key);
         if (overlay.has(id)) return overlay.get(id) ?? undefined;
@@ -409,8 +683,18 @@ export class BuildEngine {
       };
       const failures: { claim: Claim; error: unknown }[] = [];
       for (const o of outcomes) {
+        if (!valid.has(o)) {
+          // Release our lease so the task is claimable again at once.
+          this.#release(o.claim, writes);
+          continue;
+        }
         if (o.kind === "failed") {
           failures.push(o);
+          continue;
+        }
+        if (o.kind === "skip") {
+          this.#dequeue(o.claim, writes);
+          stats.skipped++;
           continue;
         }
         const { cell, task } = o.claim;
@@ -419,32 +703,38 @@ export class BuildEngine {
         let conflict: string | undefined;
         for (const { ref } of o.emitted.values()) {
           const r = await row(ref[0], ref[1]);
-          if (r && r.owner !== "" && r.owner !== self) conflict = `${ref[0]}/${ref[1]}`;
+          if (r && r.owner !== "" && r.owner !== self) {
+            const sameBatch = overlay.has(k(ref[0], ref[1]));
+            if (sameBatch || !(await this.#stale(r.owner))) conflict = `${ref[0]}/${ref[1]}`;
+          }
         }
         if (conflict) {
           failures.push({
             claim: o.claim,
-            error: new ConflictingEmission(`${conflict}: emitted by another task of the batch`),
+            error: new ConflictingEmission(`${conflict}: emitted by another task`),
           });
           continue;
         }
         for (const { ref, json } of o.emitted.values()) {
           const r = await row(ref[0], ref[1]);
-          if (r?.json === json) continue;
+          if (r?.json === json && r.owner === self) continue;
           set(writes, k("r", ref[0], ref[1]), `${self}${OWNER_SEP}${json}`);
           overlay.set(k(ref[0], ref[1]), { owner: self, json });
-          await this.#enqueueDependents(ref[0], ref[1], writes);
+          if (r?.json !== json) await this.#enqueueDependents(ref[0], ref[1], r?.json, writes);
         }
         for (const ref of o.prev.o) {
           if (o.emitted.has(k(ref[0], ref[1]))) continue;
           const r = await row(ref[0], ref[1]);
-          if (r?.owner !== self) continue;
+          if (r?.owner !== self) continue; // handed over to another task
           set(writes, k("r", ref[0], ref[1]), undefined);
           overlay.set(k(ref[0], ref[1]), null);
-          await this.#enqueueDependents(ref[0], ref[1], writes);
+          await this.#enqueueDependents(ref[0], ref[1], r.json, writes);
         }
         this.#traceWrites(cell, task, o.prev, o.rawPrev, o.next, writes);
-        await this.#dequeue(o.claim, writes);
+        for (const [ckey, raw] of o.consumed) {
+          if (!writes.has(ckey)) writes.set(ckey, { key: ckey, ifValue: raw });
+        }
+        this.#dequeue(o.claim, writes);
         if ((await this.#kv.get(k("d", cell, task))) !== undefined) {
           set(writes, k("d", cell, task), undefined);
         }
@@ -461,7 +751,7 @@ export class BuildEngine {
     prev: Trace,
     rawPrev: string | undefined,
     next: Trace | undefined,
-    writes: Map<string, Write>,
+    writes: Map<string, KvWrite>,
   ): void {
     const nextRaw = next ? JSON.stringify(next) : undefined;
     if (nextRaw !== rawPrev) set(writes, k("f", cell, task), nextRaw);
@@ -476,35 +766,39 @@ export class BuildEngine {
   }
 
   /** Dequeue unless re-queued since the claim (by this batch or a concurrent write). */
-  async #dequeue(claim: Claim, writes: Map<string, Write>): Promise<void> {
+  #dequeue(claim: Claim, writes: Map<string, KvWrite>): void {
     if (writes.has(claim.qkey)) return;
-    const current = await this.#kv.get(claim.qkey);
-    if (current !== undefined && (JSON.parse(current) as QueueRow).g === claim.row.g) {
-      set(writes, claim.qkey, undefined);
-    }
+    writes.set(claim.qkey, { key: claim.qkey, ifValue: claim.raw });
+  }
+
+  /** Give up our lease (keep the task queued as it was). */
+  #release(claim: Claim, writes: Map<string, KvWrite>): void {
+    if (writes.has(claim.qkey)) return;
+    const { o: _o, u: _u, ...free } = claim.row;
+    writes.set(claim.qkey, { key: claim.qkey, value: JSON.stringify(free), ifValue: claim.raw });
   }
 
   /** Count a failed attempt; dead-letter at `maxAttempts`. */
   async #failWrites(
     claim: Claim,
     error: unknown,
-    writes: Map<string, Write>,
+    writes: Map<string, KvWrite>,
     stats: RunStats,
   ): Promise<void> {
     stats.failed++;
     this.#log.warn("task failed", { cell: claim.cell, key: claim.task, error });
     if (writes.has(claim.qkey)) return; // re-queued by this batch: fresh attempt
-    const current = await this.#kv.get(claim.qkey);
     // A newer change re-queued it with a fresh attempt count: leave it.
-    if (current === undefined || (JSON.parse(current) as QueueRow).g !== claim.row.g) return;
+    if ((await this.#kv.get(claim.qkey)) !== claim.raw) return;
     const attempts = claim.row.a + 1;
     if (attempts < this.#maxAttempts) {
-      set(writes, claim.qkey, JSON.stringify({ g: claim.row.g, a: attempts }));
+      const retry: QueueRow = { g: claim.row.g, a: attempts, ...(claim.row.z ? { z: 1 } : {}) };
+      writes.set(claim.qkey, { key: claim.qkey, value: JSON.stringify(retry), ifValue: claim.raw });
       return;
     }
     stats.deadLettered++;
     this.#log.error("task dead-lettered", { cell: claim.cell, key: claim.task, error });
-    set(writes, claim.qkey, undefined);
+    writes.set(claim.qkey, { key: claim.qkey, ifValue: claim.raw });
     set(
       writes,
       k("d", claim.cell, claim.task),
@@ -514,14 +808,14 @@ export class BuildEngine {
 
   // ---- storage helpers --------------------------------------------------------
 
-  async #row(signal: string, key: string): Promise<{ owner: string; json: string } | undefined> {
+  async #row(signal: string, key: string): Promise<StoredRow | undefined> {
     const raw = await this.#kv.get(k("r", signal, key));
     if (raw === undefined) return undefined;
     const i = raw.indexOf(OWNER_SEP);
     return { owner: raw.slice(0, i), json: raw.slice(i + 1) };
   }
 
-  /** Serialise read-check-commit sections (put/remove, batch commits). */
+  /** Serialise read-check-commit sections of this engine (put/remove, batch commits). */
   #locked<T>(fn: () => Promise<T>): Promise<T> {
     const result = this.#lock.then(fn);
     this.#lock = result.then(
@@ -536,10 +830,29 @@ function rowJson(raw: string): string {
   return raw.slice(raw.indexOf(OWNER_SEP) + 1);
 }
 
-function set(writes: Map<string, Write>, key: string, value: string | undefined): void {
+function set(writes: Map<string, KvWrite>, key: string, value: string | undefined): void {
   writes.set(key, { key, value });
 }
 
 function errorText(error: unknown): string {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+}
+
+/**
+ * Fingerprint of a row's canonical JSON, for "did what this task read change?".
+ * Small values are kept verbatim (exact); larger ones as length + two
+ * independent 32-bit hashes (FNV-1a and a murmur-style mix) — a false "equal"
+ * needs a 64-bit collision at the same length.
+ */
+function fingerprint(json: string): string {
+  if (json.length <= 48) return `=${json}`;
+  let a = 0x811c9dc5;
+  let b = 0x9747b28c;
+  for (let i = 0; i < json.length; i++) {
+    const c = json.charCodeAt(i);
+    a = Math.imul(a ^ c, 0x01000193);
+    b = Math.imul(b ^ c, 0x5bd1e995);
+    b ^= b >>> 15;
+  }
+  return `#${json.length.toString(36)}:${(a >>> 0).toString(36)}:${(b >>> 0).toString(36)}`;
 }

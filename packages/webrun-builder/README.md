@@ -114,7 +114,7 @@ interface TaskContext {
 ### `BuildEngine`
 
 ```ts
-new BuildEngine({ store, cells, maxAttempts?, batchSize?, concurrency?, logger? })
+new BuildEngine({ store, cells, maxAttempts?, batchSize?, concurrency?, shared?, leaseMs?, now?, owner?, logger? })
 ```
 
 | Member | Does |
@@ -155,7 +155,7 @@ new SqlKV(new NodeSqlDriver(new DatabaseSync("b.db")));   // one WITHOUT ROWID t
 ```
 
 All three implement the `KV` port: `get(key)`, ordered prefix `scan(prefix, { after, limit })` and
-atomic `commit(writes)` — a shape that also maps onto IndexedDB or LMDB.
+atomic `commit(writes)`, where a write may carry a condition (`ifValue`, an SQL `UPDATE … WHERE value = ?`) — a shape that also maps onto IndexedDB or LMDB.
 
 ### Mirror a file tree into a source signal
 
@@ -243,10 +243,11 @@ no work is proportional to the corpus — a no-op run is one empty scan.
 
 ```
 r/<signal>/<key>                → <owner>\x02<canonical json>      rows (owner "" = source)
-q/<rank>/<cell>/<task>          → {"g": token, "a": attempts}      the queue
-f/<cell>/<task>                 → {"r": reads, "l": lists, "o": outputs}
+q/<rank>/<cell>/<task>          → {"g", "a", "o"?, "u"?, "z"?}     the queue (token, attempts, lease, reset)
+f/<cell>/<task>                 → {"r", "l", "o", "i", "rh", "s"?} reads, lists, outputs, fingerprints, state
 x/<signal>/<key>/<cell>/<task>  → ""                               row → reader index
 xl/<signal>/<cell>/<task>       → ""                               signal → lister index
+c/<cell>/<signal>/<key>         → {"p": previous, "g"}             incremental-reduce changes
 d/<cell>/<task>                 → {"attempts", "error"}            dead letters
 ```
 
@@ -254,24 +255,66 @@ Tuple parts are joined with U+0001; names must not contain U+0000–U+0002.
 
 ### A change during a task survives its commit
 
-Queue rows carry a token; a commit dequeues a task only if its row still carries the claimed token.
-A write that lands while the task runs replaces the token, so the task runs again with the new
-value.
+Queue rows carry a token; a commit dequeues a task only if its row still holds the claimed value (a
+conditional delete). A write that lands while the task runs replaces the token, so the task runs
+again with the new value.
+
+### Verify before execute
+
+Each task's trace keeps a fingerprint of every row it read (its own input rows included):
+small values verbatim, larger ones as length plus two 32-bit hashes. A queued map task whose reads
+all match is dequeued without running (`RunStats.skipped`). This happens for a change undone
+before the run (remove + put back, A → B → A), or a spurious re-queue. `invalidate` bypasses it.
+
+### Concurrent writes and several engines
+
+- **Within one engine:** a `put` that lands while a task runs is never lost. If it hits the task's
+  own input, the task's queue row changes and the conditional dequeue keeps the task queued. If it
+  hits a row the task read dynamically, the batch commit (which takes the same lock as `put`)
+  re-checks those reads and leaves stale tasks queued.
+- **Several engines on one store (`shared: true`):** claims become leases (`leaseMs`, default
+  30 s), taken with conditional writes, so a task runs in one engine at a time. A crashed engine's
+  claims become claimable again when its lease expires. Tasks that read source rows dynamically
+  register those reads in the reverse index before re-checking them, so a write from another engine
+  is either seen by the check or finds the registration and re-queues the task. This needs a store
+  whose conditions hold across those engines: `SqlKV` across processes, `MemKV` within one process.
+  `FilesKV` is single-process. `run()` reports `pending: true` while the most upstream work is
+  leased by another engine.
+
+### Incremental reduce
+
+```ts
+const total: CellDef = {
+  id: "total", kind: "reduce", incremental: true, inputs: ["len"], outputs: ["total"],
+  async run(ctx) {
+    let s = ctx.state as { sum: number } | undefined;
+    if (!s) s = { sum: (await ctx.list("len")).reduce((a, r) => a + Number(r.value), 0) };
+    else for (const c of await ctx.changes("len")) s.sum += Number(c.value ?? 0) - Number(c.previous ?? 0);
+    ctx.setState(s);
+    ctx.emit("total", "sum", s.sum);
+  },
+};
+```
+
+For an incremental reduce, the engine records, per changed input row, the value it had at the
+task's last successful run. `ctx.changes(signal)` returns those changes with their current and
+previous values, and `ctx.state` / `ctx.setState` carry a small state between runs (stored with the
+trace). `ctx.state` is `undefined` on the first run and after `invalidate`; recompute with `list`
+then.
 
 ### What will surprise you
 
-- **One engine per store at a time.** The store has no compare-and-set, so the token re-check and
-  the commit run under an in-process lock. Two processes on one store could lose a re-queue.
 - **A batch may be replayed after a crash.** Side effects outside the store (files written) must be
   idempotent per task.
 - **A dead-lettered task does not fail `run()`.** Check `deadLetters()` or `status()`; its previous
   outputs stay as they were.
-- **Ownership hand-over within one run can fail.** If task X stops emitting a row that task Y starts
-  emitting and Y runs first, Y fails with `ConflictingEmission`; it is retried and succeeds once X
-  has released the row (or after `requeue`).
-- **A reduce cell re-lists its whole input** on every change of it.
-- **A net no-op still runs dependents once.** Removing a row and putting back its old value
-  before `run()` queues the dependents at each write; they re-run and cut off immediately.
+- **Ownership hand-over:** a task may take over a row whose owner is itself queued (stale: it may
+  let go of the row when it runs). If that owner then still emits the row, it fails with
+  `ConflictingEmission`. Two tasks that keep emitting the same row always conflict.
+- **A plain reduce cell re-lists its whole input** on every change of it; use `incremental: true`
+  for large inputs.
+- **Two producers in different engines** emitting the same row at the same moment can both commit
+  (last writer wins). The ownership check reads before the commit.
 
 ## License
 

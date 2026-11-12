@@ -173,7 +173,7 @@ describe("massive — crash storms", () => {
           // A finished store has nothing left to do.
           expect(await drain(factory(kv, g.cells))).toBe(0);
         }
-        expect(crashes).toBeGreaterThan(5);
+        expect(crashes).toBeGreaterThan(SCALE >= 1 ? 5 : 1); // small scales commit (and so crash) less
         expect(executed).toBeGreaterThan(0);
       },
       T,

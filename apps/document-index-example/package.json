@@ -3,10 +3,10 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Example: incremental PDF indexing (extract → chunk → embed → full-text + vector indexes) on @statewalker/webrun-builder and statewalker-search.",
+  "description": "Example: incremental PDF indexing (extract \u2192 chunk \u2192 embed \u2192 full-text + vector indexes) on @statewalker/webrun-builder and statewalker-search.",
   "license": "MIT",
   "scripts": {
-    "test": "vitest run",
+    "test": "vitest run && DOCS=40 CHUNKS=20 vitest run --config vitest.massive.config.ts",
     "test:massive": "vitest run --config vitest.massive.config.ts",
     "typecheck": "tsc --noEmit",
     "lint": "biome check --write .",

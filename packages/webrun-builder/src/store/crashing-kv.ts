@@ -1,4 +1,4 @@
-import type { KV } from "./kv.js";
+import type { KV, KvWrite } from "./kv.js";
 
 export class CrashError extends Error {
   override name = "CrashError";
@@ -25,10 +25,10 @@ export class CrashingKV implements KV {
     return this.inner.scan(prefix, opts);
   }
 
-  async commit(writes: ReadonlyArray<{ key: string; value?: string }>): Promise<void> {
+  async commit(writes: ReadonlyArray<KvWrite>): Promise<boolean[]> {
     this.commits++;
     // The process is dead from the failing commit on: nothing more is applied.
     if (this.commits >= this.failAt) throw new CrashError(`crash at commit ${this.failAt}`);
-    await this.inner.commit(writes);
+    return this.inner.commit(writes);
   }
 }

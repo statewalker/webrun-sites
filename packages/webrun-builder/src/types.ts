@@ -30,6 +30,26 @@ export interface TaskContext {
   list(signal: string): Promise<Row[]>;
   /** Produce an output row. Everything a task emits in a successful run is its output set. */
   emit(signal: string, key: string, value: Json): void;
+  /**
+   * Incremental reduce cells only: the state the task saved with `setState` in
+   * its last successful run; `undefined` on the first run or after
+   * `invalidate` — then recompute from `list` and save a fresh state.
+   */
+  readonly state: Json | undefined;
+  /** Incremental reduce cells only: save state for the next run (small: it is stored with the trace). */
+  setState(state: Json): void;
+  /**
+   * Incremental reduce cells only: the rows of input `signal` that changed
+   * since the last successful run, with their current value (`undefined` if
+   * removed) and their value at that run (`undefined` if new).
+   */
+  changes(signal: string): Promise<Change[]>;
+}
+
+export interface Change {
+  key: string;
+  value: Json | undefined;
+  previous: Json | undefined;
 }
 
 /**
@@ -54,6 +74,12 @@ export interface CellDef {
   /** Extra signals the cell may read with `ctx.get` / `ctx.list`. */
   reads?: readonly string[];
   outputs: readonly string[];
+  /**
+   * Reduce cells only: fold `ctx.changes()` into `ctx.state` instead of
+   * re-listing the inputs on every change. The engine then records, per input
+   * row change, the value the row had at the task's last run.
+   */
+  incremental?: boolean;
   run(ctx: TaskContext): void | Promise<void>;
   /**
    * Clean up external side effects (files written by `run`) of a dead map task.
@@ -77,6 +103,24 @@ export interface BuildEngineOptions {
   /** Tasks of one batch executed concurrently (default 1). */
   concurrency?: number;
   logger?: Logger;
+  /**
+   * Several engines (processes) share this store (default false): claims are
+   * then leases taken with conditional writes, so a task runs in one engine at
+   * a time. Needs a store whose conditions hold across those engines — `SqlKV`
+   * across processes, `MemKV` within one; not `FilesKV` (single process).
+   * Costs one extra commit per batch.
+   */
+  shared?: boolean;
+  /**
+   * With `shared`: how long a claimed batch stays reserved (default 30 s); a
+   * crashed engine's claims become available again after this. Keep it longer
+   * than a batch takes.
+   */
+  leaseMs?: number;
+  /** Clock for leases (default `Date.now`). */
+  now?: () => number;
+  /** Lease holder id (default: random). */
+  owner?: string;
 }
 
 export interface RunOptions {
@@ -89,11 +133,16 @@ export interface RunOptions {
 export interface RunStats {
   /** Task executions that committed, including retractions of dead tasks. */
   executed: number;
+  /** Queued tasks found unchanged (everything they read hashes equal) and dequeued without running. */
+  skipped: number;
   /** Failed attempts. */
   failed: number;
   /** Tasks moved to the dead letter in this run. */
   deadLettered: number;
-  /** True when the run stopped early (`maxTasks`, abort) with work still queued. */
+  /**
+   * True when the run stopped with work still queued: `maxTasks`, abort, or
+   * the most upstream work is leased by another engine.
+   */
   pending: boolean;
 }
 

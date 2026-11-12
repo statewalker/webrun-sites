@@ -16,13 +16,21 @@ export {
 } from "./scan-sources.js";
 export { CrashError, CrashingKV } from "./store/crashing-kv.js";
 export { FilesKV } from "./store/files-kv.js";
-export { emptyMetrics, type KV, type KvMetrics, MemKV } from "./store/kv.js";
+export {
+  conditionHolds,
+  emptyMetrics,
+  type KV,
+  type KvMetrics,
+  type KvWrite,
+  MemKV,
+} from "./store/kv.js";
 export { type SqlDriver, SqlKV } from "./store/sql-kv.js";
 export { Topology } from "./topology.js";
 export {
   type BuildEngineOptions,
   type BuildStatus,
   type CellDef,
+  type Change,
   ConflictingEmission,
   type DeadLetter,
   type Json,

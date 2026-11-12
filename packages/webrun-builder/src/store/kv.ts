@@ -6,14 +6,36 @@
  * translate into real persistence costs.
  *
  * Reads are not transactional with commits: an engine reads, then commits a
- * fixed list of writes (as D1 `batch()` allows).
+ * fixed list of writes (as D1 `batch()` allows). A write may carry a
+ * condition on the key's current value (`ifValue`); it then applies only if
+ * the condition holds — a per-write compare-and-set, the shape of an SQL
+ * `UPDATE … WHERE value = ?`. Conditions are what let several processes share
+ * one store (queue leases, conditional dequeue).
  */
 export interface KV {
   get(key: string): Promise<string | undefined>;
   /** Rows whose key starts with `prefix`, ascending; `after` is exclusive. */
   scan(prefix: string, opts?: { after?: string; limit?: number }): AsyncIterable<[string, string]>;
-  /** Apply all writes atomically. `value: undefined` deletes. */
-  commit(writes: ReadonlyArray<{ key: string; value?: string }>): Promise<void>;
+  /**
+   * Apply all writes in one transaction. `value: undefined` deletes. A write
+   * with `ifValue` applies only if the key currently holds that value
+   * (`null`: only if the key is absent). Resolves, per write, whether it applied.
+   */
+  commit(writes: ReadonlyArray<KvWrite>): Promise<boolean[]>;
+}
+
+export interface KvWrite {
+  key: string;
+  /** New value; `undefined` deletes. */
+  value?: string;
+  /** Apply only if the current value equals this (`null`: only if absent). */
+  ifValue?: string | null;
+}
+
+/** Whether a write's condition holds against the current value. */
+export function conditionHolds(write: KvWrite, current: string | undefined): boolean {
+  if (write.ifValue === undefined) return true;
+  return write.ifValue === null ? current === undefined : current === write.ifValue;
 }
 
 export interface KvMetrics {
@@ -49,6 +71,11 @@ export class MemKV implements KV {
     return this.values.get(key);
   }
 
+  /** Current value without counting a read (for stores layered on this one). */
+  peek(key: string): string | undefined {
+    return this.values.get(key);
+  }
+
   async *scan(
     prefix: string,
     opts?: { after?: string; limit?: number },
@@ -71,9 +98,14 @@ export class MemKV implements KV {
     }
   }
 
-  async commit(writes: ReadonlyArray<{ key: string; value?: string }>): Promise<void> {
+  async commit(writes: ReadonlyArray<KvWrite>): Promise<boolean[]> {
     this.metrics.commits++;
-    for (const { key, value } of writes) {
+    const applied: boolean[] = [];
+    for (const w of writes) {
+      const { key, value } = w;
+      const ok = conditionHolds(w, this.values.get(key));
+      applied.push(ok);
+      if (!ok) continue;
       if (value === undefined) {
         if (this.values.delete(key)) this.keys.delete(key);
         this.metrics.rowsDeleted++;
@@ -84,6 +116,7 @@ export class MemKV implements KV {
         this.metrics.bytesWritten += key.length + value.length;
       }
     }
+    return applied;
   }
 
   /** Number of stored rows. */

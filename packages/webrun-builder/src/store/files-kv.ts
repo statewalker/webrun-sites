@@ -1,7 +1,7 @@
 import { type FilesApi, joinPath } from "@statewalker/webrun-files";
 import { tryReadJson, writeJsonAtomic } from "../json-io.js";
 import { seqKey } from "../keys.js";
-import { type KV, type KvMetrics, MemKV } from "./kv.js";
+import { conditionHolds, type KV, type KvMetrics, type KvWrite, MemKV } from "./kv.js";
 
 type Write = { key: string; value?: string };
 
@@ -25,6 +25,7 @@ interface Snapshot {
 export class FilesKV implements KV {
   private seq: number;
   private segments: number[];
+  private lock: Promise<void> = Promise.resolve();
 
   private constructor(
     private readonly files: FilesApi,
@@ -85,14 +86,31 @@ export class FilesKV implements KV {
     return this.mem.scan(prefix, opts);
   }
 
-  async commit(writes: ReadonlyArray<Write>): Promise<void> {
-    if (writes.length === 0) return;
-    const n = this.seq + 1;
-    await writeJsonAtomic(this.files, joinPath(this.dir, "log", `${seqKey(n)}.json`), writes);
-    await this.mem.commit(writes);
-    this.seq = n;
-    this.segments.push(n);
-    if (this.segments.length >= this.compactEvery) await this.compact();
+  async commit(writes: ReadonlyArray<KvWrite>): Promise<boolean[]> {
+    // Serialised, so conditions are evaluated against the state they apply to.
+    const result = this.lock.then(async () => {
+      const applied: boolean[] = [];
+      const effective: Write[] = [];
+      for (const w of writes) {
+        const ok = conditionHolds(w, this.mem.peek(w.key));
+        applied.push(ok);
+        if (ok)
+          effective.push(w.value === undefined ? { key: w.key } : { key: w.key, value: w.value });
+      }
+      if (effective.length === 0) return applied;
+      const n = this.seq + 1;
+      await writeJsonAtomic(this.files, joinPath(this.dir, "log", `${seqKey(n)}.json`), effective);
+      await this.mem.commit(effective);
+      this.seq = n;
+      this.segments.push(n);
+      if (this.segments.length >= this.compactEvery) await this.compact();
+      return applied;
+    });
+    this.lock = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }
 
   /** Fold the log into `snapshot.json` and remove the folded segments. */
