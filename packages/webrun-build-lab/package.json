@@ -15,8 +15,7 @@
     "test:massive": "vitest run --config vitest.massive.config.ts"
   },
   "dependencies": {
-    "@statewalker/webrun-builder": "workspace:^",
-    "@statewalker/webrun-dataflow": "workspace:^"
+    "@statewalker/webrun-builder": "workspace:^"
   },
   "devDependencies": {
     "@statewalker/webrun-files-mem": "catalog:",

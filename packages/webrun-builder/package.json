@@ -41,7 +41,6 @@
     "format": "biome format --write ."
   },
   "dependencies": {
-    "@statewalker/webrun-dataflow": "workspace:^",
     "@statewalker/webrun-files": "catalog:"
   },
   "devDependencies": {

@@ -26,7 +26,6 @@ tools/      private test harness (consumer-install)
 
 | Package | Description | npm |
 | --- | --- | --- |
-| [`@statewalker/webrun-dataflow`](packages/webrun-dataflow) | Signal-driven dataflow graph: impact propagation, topological order, transaction and updates stores. No runtime dependencies. | [npm](https://www.npmjs.com/package/@statewalker/webrun-dataflow) |
 | [`@statewalker/webrun-builder`](packages/webrun-builder) | `BuildEngine`: key-level incremental, resumable build engine — cells over signals with dynamic dependencies, early cut-off, retraction and dead letters; state in a pluggable KV (memory, `FilesApi`, SQLite); `scanSources` for file trees. | [npm](https://www.npmjs.com/package/@statewalker/webrun-builder) |
 | [`@statewalker/webrun-modules`](packages/webrun-modules) | Isomorphic module server: resolves, downloads and transforms npm packages and authored TS/JS into ESM, served from a `FilesApi` cache. | [npm](https://www.npmjs.com/package/@statewalker/webrun-modules) |
 | [`@statewalker/webrun-modules-build`](packages/webrun-modules-build) | Batch module build: runs the `webrun-modules` transforms through `BuildEngine` and writes a static `.js`/`.css` tree. | [npm](https://www.npmjs.com/package/@statewalker/webrun-modules-build) |
@@ -44,7 +43,7 @@ tools/      private test harness (consumer-install)
 How the packages depend on each other:
 
 ```
-webrun-dataflow ─► webrun-builder ─┐
+webrun-builder ────────────────────┐
 webrun-modules ──► webrun-tailwind ┼─► webrun-modules-build
 webrun-modules ────────────────────┘
 
@@ -53,7 +52,7 @@ webrun-site-builder ─► webrun-site-host ─► apps/*
 
 External `@statewalker` dependencies, by package name:
 
-- `@statewalker/webrun-files` (every package except `webrun-dataflow`; a peer dependency of
+- `@statewalker/webrun-files` (every package; a peer dependency of
   `webrun-site-builder` and `webrun-site-host`), `@statewalker/webrun-files-mem`,
   `@statewalker/webrun-files-node` (dev only);
 - `@statewalker/webrun-http-browser` (`webrun-site-host` and the demos);

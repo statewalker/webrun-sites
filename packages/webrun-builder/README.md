@@ -40,8 +40,8 @@ is this engine.
 pnpm add @statewalker/webrun-builder
 ```
 
-Runtime dependencies: `@statewalker/webrun-dataflow` (topology) and `@statewalker/webrun-files`
-(`FilesKV`, `scanSources`). `SqlKV` needs no SQL package: it takes any object shaped like the
+Runtime dependency: `@statewalker/webrun-files` (`FilesKV`, `scanSources`). The engine carries its
+own topology (the former `webrun-dataflow` graph is folded in). `SqlKV` needs no SQL package: it takes any object shaped like the
 `SqlDriver` of `@statewalker/webrun-files-sqlite`.
 
 ### One entry point
@@ -49,11 +49,11 @@ Runtime dependencies: `@statewalker/webrun-dataflow` (topology) and `@statewalke
 ESM, built to `dist/` (TypeScript sources in `src/`); no Node built-ins, so it runs in browsers,
 workers and Node.
 
-Exports: `BuildEngine`, `MemKV`, `FilesKV`, `SqlKV`, `CrashingKV` / `CrashError` (fault injection
+Exports: `BuildEngine`, `createBuildEngine`, `openStore`, `Topology`, `MemKV`, `FilesKV`, `SqlKV`, `CrashingKV` / `CrashError` (fault injection
 for tests), `scanSources`, `SOURCES_SIGNAL`, `canonicalJson`, `makeProjectIgnore`,
 `compileIgnoreRules`, `NULL_LOGGER`, `ConflictingEmission`, `emptyMetrics`, and the types
 `CellDef`, `TaskContext`, `BuildEngineOptions`, `RunOptions`, `RunStats`, `BuildStatus`,
-`DeadLetter`, `Json`, `Row`, `RowRef`, `KV`, `KvMetrics`, `SqlDriver`, `ScanSourcesOptions`,
+`DeadLetter`, `PersistenceConfig`, `CreateBuildEngineOptions`, `Json`, `Row`, `RowRef`, `KV`, `KvMetrics`, `SqlDriver`, `ScanSourcesOptions`,
 `ScanResult`, `Logger`, `IgnoreRule`.
 
 ### Declare cells, write sources, run
@@ -129,6 +129,22 @@ new BuildEngine({ store, cells, maxAttempts?, batchSize?, concurrency?, logger? 
 `batchSize` (default 64) is how many tasks of one cell commit per store transaction — a crash loses
 at most one batch. `concurrency` (default 1) runs a batch's tasks concurrently; they are
 independent because a cell never reads its own outputs.
+
+### Persistence is configuration
+
+```ts
+import { createBuildEngine } from "@statewalker/webrun-builder";
+
+const engine = await createBuildEngine({
+  cells,
+  persistence: { kind: "files", files, path: ".build/state" },
+  // { kind: "memory" }                      — default; nothing survives the process
+  // { kind: "sql", driver, table?: "kv" }   — node:sqlite, Durable Objects, D1
+  // { kind: "custom", store }               — any KV implementation
+});
+```
+
+`openStore(config)` opens the same configurations without creating an engine.
 
 ### Stores
 
