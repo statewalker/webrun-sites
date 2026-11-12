@@ -321,7 +321,16 @@ export class BuildEngine {
       tasks += claims.length;
       const writesBefore = this.#sourceWrites;
       const outcomes = await this.#executeAll(claims);
+      const before = { ...stats };
       await this.#commitBatch(outcomes, stats, writesBefore);
+      opts?.onProgress?.({
+        builder: (claims[0] as Claim).builder,
+        tasks: claims.length,
+        executed: stats.executed - before.executed,
+        skipped: stats.skipped - before.skipped,
+        failed: stats.failed - before.failed,
+        deadLettered: stats.deadLettered - before.deadLettered,
+      });
     }
   }
 

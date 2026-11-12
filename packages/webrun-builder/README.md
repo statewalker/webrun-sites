@@ -121,7 +121,7 @@ new BuildEngine({ store, builders, maxAttempts?, batchSize?, concurrency?, share
 |---|---|
 | `put(collection, key, value)` / `remove(collection, key)` | write a source collection (one no builder outputs); resolve `true` if it changed |
 | `get` / `list` / `keys` | read any collection |
-| `run({ maxTasks?, signal? })` | execute queued tasks, most upstream first, until the queue is empty (or interrupted: `pending: true`) |
+| `run({ maxTasks?, signal?, onProgress? })` | execute queued tasks, most upstream first, until the queue is empty (or interrupted: `pending: true`) |
 | `status()` | queued tasks per builder, dead-letter count |
 | `deadLetters()` / `requeue(builder, key)` | inspect parked tasks and put one back |
 | `invalidate(builder)` | queue every task of a builder (its code changed); downstream re-runs only where outputs change |
@@ -162,7 +162,11 @@ atomic `commit(writes)`, where a write may carry a condition (`ifValue`, an SQL 
 ```ts
 import { scanSources } from "@statewalker/webrun-builder";
 
-await scanSources(engine, { files, root: "/" });   // → { seen, changed, removed }
+await scanSources(engine, { files, root: "/" });   // → { seen, changed, removed, deferred }
+await engine.run({ onProgress: (p) => console.log(p.builder, p.executed) }); // per committed batch
+
+// A large corpus in batches: each batch flows through the whole pipeline before the next.
+while ((await scanSources(engine, { files, root: "/", limit: 100 })).deferred > 0) await engine.run();
 await engine.run();
 ```
 
