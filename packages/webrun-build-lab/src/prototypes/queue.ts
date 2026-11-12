@@ -1,7 +1,7 @@
 /**
  * Prototype B — eager dirty queue with a reverse-dependency index.
  *
- * Lineage: `webrun-builders` (a queue of (builder, key) work items committed
+ * Lineage: `webrun-cells` (a queue of (cell, key) work items committed
  * atomically with the builder's outputs and provenance), generalised from static
  * "input key → task" triggering to tracked dynamic reads.
  *

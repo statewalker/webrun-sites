@@ -9,7 +9,7 @@ describe("real PDFs through the default extractor (statewalker pdfExtractor / un
     await files.write("/papers/solar.pdf", [
       makePdf([
         [
-          "Photovoltaic builders convert sunlight into electricity.",
+          "Photovoltaic cells convert sunlight into electricity.",
           "Silicon wafers dominate production.",
         ],
         ["Perovskite tandems reach high efficiency in the laboratory."],

@@ -39,7 +39,7 @@ imports `node:fs` and `node:module`, so use it under Node.
 
 Exports: `newProjectBuild` (with the types `ProjectBuild` and
 `ProjectBuildOptions`), `webrunBuilders` (the builder set, for driving your own
-`BuildEngine`), `PREPROCESS_CELL` and `SERVED_SIGNAL`, `makeExtMapPolicy` (the URL
+`BuildEngine`), `PREPROCESS_BUILDER` and `SERVED_COLLECTION`, `makeExtMapPolicy` (the URL
 policy) and the `WebrunBuildHost` type.
 
 ### Build a project into a cache

@@ -3,9 +3,9 @@ import { urlPath, walkFrom } from "@statewalker/webrun-modules";
 import { emitBuildForms, isAsset } from "./emit-forms.js";
 import type { WebrunBuildHost } from "./host.js";
 
-export const PREPROCESS_CELL = "Preprocess";
+export const PREPROCESS_BUILDER = "Preprocess";
 /** Collection of emitted entry pointers: key = emitted path, value = source uri. */
-export const SERVED_SIGNAL = "served";
+export const SERVED_COLLECTION = "served";
 
 /** Sources the transform builds as entries: JS/TS modules, CSS and JSON. */
 const ENTRY = /\.(?:(?:m|c)?[jt]sx?|css|json)$/;
@@ -33,9 +33,9 @@ function toProjectId(uri: string): string {
 export function webrunBuilders(host: WebrunBuildHost): BuilderDef[] {
   return [
     {
-      id: PREPROCESS_CELL,
+      id: PREPROCESS_BUILDER,
       inputs: [SOURCES_COLLECTION],
-      outputs: [SERVED_SIGNAL],
+      outputs: [SERVED_COLLECTION],
       async run(ctx) {
         if (!ENTRY.test(ctx.key)) return;
         const id = toProjectId(ctx.key);
@@ -50,7 +50,7 @@ export function webrunBuilders(host: WebrunBuildHost): BuilderDef[] {
           ids.filter((x) => x.endsWith(".json") || isAsset(x) || host.emitted.has(x)),
           host.ctx,
         );
-        ctx.emit(SERVED_SIGNAL, host.ctx.policy.emittedPath(id), ctx.key);
+        ctx.emit(SERVED_COLLECTION, host.ctx.policy.emittedPath(id), ctx.key);
       },
       async dispose(key) {
         const id = toProjectId(key);

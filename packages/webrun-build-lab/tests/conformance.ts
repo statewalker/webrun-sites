@@ -25,8 +25,8 @@ import { CrashError, CrashingKV, type KV, MemKV } from "../src/core/kv.js";
 import type { BuilderDef, Engine, EngineFactory, Json } from "../src/core/types.js";
 import { NaiveEngine } from "../src/prototypes/naive.js";
 
-const ALL_CELLS = [split, upper, len, double, stats, left, right, join, compile, bundle];
-const ALL_SIGNALS = [
+const ALL_BUILDERS = [split, upper, len, double, stats, left, right, join, compile, bundle];
+const ALL_COLLECTIONS = [
   "chunks",
   "upper",
   "len",
@@ -48,7 +48,7 @@ async function apply(engine: Engine, sources: Sources): Promise<void> {
 }
 
 /** The reference state for `sources` under `builders`. */
-async function expected(builders: BuilderDef[], sources: Sources, collections = ALL_SIGNALS) {
+async function expected(builders: BuilderDef[], sources: Sources, collections = ALL_COLLECTIONS) {
   const ref = new NaiveEngine({ kv: new MemKV(), builders });
   await apply(ref, sources);
   await ref.run();
@@ -275,7 +275,7 @@ export function defineConformance(
           if (runs > 200) throw new Error("did not converge");
         }
         expect(runs).toBeGreaterThan(3);
-        expect(await snapshot(engine, ALL_SIGNALS)).toEqual(await expected(builders, sources));
+        expect(await snapshot(engine, ALL_COLLECTIONS)).toEqual(await expected(builders, sources));
       });
     });
 
@@ -498,7 +498,7 @@ export function defineConformance(
           const rec = recorder();
           const resumed = make(recorded(rec, builders), kv);
           await drain(resumed);
-          expect(await snapshot(resumed, ALL_SIGNALS), `crash at ${failAt}`).toEqual(want);
+          expect(await snapshot(resumed, ALL_COLLECTIONS), `crash at ${failAt}`).toEqual(want);
           // Committed work is not redone: the resumed run does at most a clean run's work.
           expect(rec.log.length, `rework after crash at ${failAt}`).toBeLessThanOrEqual(clean);
         }
@@ -507,7 +507,7 @@ export function defineConformance(
 
     describe("model check", () => {
       it("matches full recompute over random edit sequences", async () => {
-        const builders = ALL_CELLS;
+        const builders = ALL_BUILDERS;
         for (const seed of [1, 2, 3, 4, 5]) {
           const rand = rng(seed);
           const engine = make(builders);
@@ -545,7 +545,7 @@ export function defineConformance(
             // Interrupt now and then.
             if (rand() < 0.3) await engine.run({ maxTasks: 1 + Math.floor(rand() * 3) });
             await drain(engine);
-            expect(await snapshot(engine, ALL_SIGNALS), `seed ${seed} step ${step}`).toEqual(
+            expect(await snapshot(engine, ALL_COLLECTIONS), `seed ${seed} step ${step}`).toEqual(
               await expected(builders, sources),
             );
           }

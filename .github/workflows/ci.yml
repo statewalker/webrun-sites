@@ -17,13 +17,15 @@ jobs:
   # dependency moved to another breaking line), applies all pending changesets with
   # `changeset version` (versions + CHANGELOG.md), commits that as "chore: version packages" to
   # main, and packs every public package whose version npm lacks. Pushes made with the workflow
-  # token do not start another run.
+  # token do not start another run (the version commit gets no CI of its own). When main moved
+  # on while this run was going, it steps aside: the run of the newer merge releases everything.
   #
   # `publish`: uploads the tarballs with npm trusted publishing (OIDC): no npm token is stored in
-  # GitHub, and the provenance attestation ties each tarball to its commit. npm's trusted
+  # GitHub. The provenance attestation names the merged commit that started the run (the source
+  # the tarballs were built from); the GitHub release tags the version commit. npm's trusted
   # publisher for each package must name this repository, this file (ci.yml) and the `npm`
-  # environment. A trusted publisher can only be added to a package that exists, so a package's
-  # first version is published by hand; `release` and `publish` then skip it.
+  # environment. A trusted publisher can only be added to a package that exists, so a package
+  # npm has never seen is skipped with a warning: publish its first version by hand.
   release:
     needs: ci
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -35,10 +37,14 @@ jobs:
       contents: write
     outputs:
       any: ${{ steps.pack.outputs.any }}
+      sha: ${{ steps.version.outputs.sha }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          # The write token is used by the push step only, not left in .git/config for
+          # install and build scripts.
+          persist-credentials: false
 
       - name: Release scripts
         uses: actions/checkout@v7
@@ -66,9 +72,21 @@ jobs:
       - name: Changesets for unreleased changes
         run: node "$RUNNER_TEMP/statewalker-ci/scripts/release-changesets.mjs"
 
-      # Applies the pending changesets and commits the new versions to main.
+      # Applies the pending changesets and commits the new versions to main. Skipped (with
+      # nothing packed) when main moved on: the newer merge's run releases, and a re-run of an
+      # old run cannot push a stale version commit.
       - name: Version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          git fetch --quiet "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" main
+          if [ "$(git rev-parse FETCH_HEAD)" != "$GITHUB_SHA" ]; then
+            echo "main moved on since $GITHUB_SHA: the newer run releases."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
           if ! ls .changeset/*.md 2>/dev/null | grep -qv '/README.md$'; then
             echo "No pending changesets."
             exit 0
@@ -79,19 +97,26 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "chore: version packages"
-          git push origin HEAD:main
-          # The packed tarballs must carry the new versions.
+          # The packed tarballs must carry the new versions: build before pushing, so a failed
+          # build leaves main untouched.
           pnpm run --if-present build
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       # `pnpm pack` writes the published manifest: workspace: and catalog: become version ranges.
       - name: Pack what npm lacks
         id: pack
+        if: steps.version.outputs.skip != 'true'
         run: |
           mkdir -p "$RUNNER_TEMP/out"
           for dir in packages/*/; do
             read -r name version private < <(node -p "const p=require('./${dir}package.json');[p.name,p.version,!!p.private].join(' ')")
             [ "$private" = true ] && continue
             npm view "$name@$version" version >/dev/null 2>&1 && continue
+            if ! npm view "$name" name >/dev/null 2>&1; then
+              echo "::warning::$name is not on npm yet: publish its first version by hand (trusted publishing needs an existing package)"
+              continue
+            fi
             (cd "$dir" && pnpm pack --pack-destination "$RUNNER_TEMP/out")
           done
           ls "$RUNNER_TEMP/out"/*.tgz >/dev/null 2>&1 && echo "any=true" >> "$GITHUB_OUTPUT" || echo "any=false" >> "$GITHUB_OUTPUT"
@@ -182,5 +207,5 @@ jobs:
           for t in packages/*.tgz; do
             tag=$(tar -xzOf "$t" package/package.json | node -p "const p=JSON.parse(require('fs').readFileSync(0));p.name+'@'+p.version")
             gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && continue
-            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --notes "Published to npm."
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "${{ needs.release.outputs.sha }}" --notes "Published to npm."
           done

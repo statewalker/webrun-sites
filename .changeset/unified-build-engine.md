@@ -3,9 +3,9 @@
 "@statewalker/webrun-modules-build": minor
 ---
 
-`webrun-builder` is rewritten as one key-level incremental engine (replacing the stage-level frontier scheduler and the private `webrun-builders`): builders over collections with tracked dynamic reads, early cut-off on unchanged values, automatic retraction with `dispose` hooks, glitch-free scheduling, retries and dead letters, group commit, and all state in a pluggable ordered KV (`MemKV`, `FilesKV`, `SqlKV`). `scanSources` mirrors a file tree into a source collection. Breaking: `registerBuilder`, `readUpdates`, `yieldControl`, `restartFrom`, the built-in `SourceScanner` builder and the `sources-removed` collection are gone — declare `BuilderDef`s, call `scanSources`, and use `dispose` for clean-up.
+`webrun-builder` is rewritten as one key-level incremental engine (replacing the stage-level frontier scheduler and the private `webrun-cells`): builders over collections with tracked dynamic reads, early cut-off on unchanged values, automatic retraction with `dispose` hooks, glitch-free scheduling, retries and dead letters, group commit, and all state in a pluggable ordered KV (`MemKV`, `FilesKV`, `SqlKV`). `scanSources` mirrors a file tree into a source collection. Breaking: `registerBuilder`, `readUpdates`, `yieldControl`, `restartFrom`, the built-in `SourceScanner` builder and the `sources-removed` collection are gone — declare `BuilderDef`s, call `scanSources`, and use `dispose` for clean-up.
 
-`webrun-modules-build` runs on the new engine: one `Preprocess` builder per source with `dispose` pruning removed sources' artifacts; `webrunBuilders` is replaced by `webrunBuilders(host)`, and `build()` returns every current entry.
+`webrun-modules-build` runs on the new engine: one `Preprocess` builder per source with `dispose` pruning removed sources' artifacts; `webrunBuilders(served)` now takes the build host and returns `BuilderDef`s, and `build()` returns every current entry.
 
 The engine is self-contained (its topology no longer comes from `webrun-dataflow`, which is removed from the workspace), and persistence is configuration: `createBuildEngine({ builders, persistence: { kind: "memory" | "files" | "sql" | "custom", … } })` / `openStore(config)`.
 

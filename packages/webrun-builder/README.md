@@ -26,7 +26,7 @@ where it stopped.
 
 This package replaces three overlapping attempts at the same problem: `webrun-dataflow`'s
 watermark stores and runner, the previous `webrun-builder` (a stage-level frontier scheduler over
-JSON files) and `webrun-builders` (a key-level SQLite engine). Three alternative designs — changelog
+JSON files) and `webrun-cells` (a key-level SQLite engine). Three alternative designs — changelog
 cursors, an eager dirty queue, pull/verifying traces — were prototyped against one conformance
 suite and benchmarked in [`packages/webrun-build-lab`](../webrun-build-lab). The eager dirty
 queue with a reverse-dependency index had the lowest incremental cost and the smallest state; it
@@ -121,7 +121,7 @@ new BuildEngine({ store, builders, maxAttempts?, batchSize?, concurrency?, share
 |---|---|
 | `put(collection, key, value)` / `remove(collection, key)` | write a source collection (one no builder outputs); resolve `true` if it changed |
 | `get` / `list` / `keys` | read any collection |
-| `run({ maxTasks?, collection? })` | execute queued tasks, most upstream first, until the queue is empty (or interrupted: `pending: true`) |
+| `run({ maxTasks?, signal? })` | execute queued tasks, most upstream first, until the queue is empty (or interrupted: `pending: true`) |
 | `status()` | queued tasks per builder, dead-letter count |
 | `deadLetters()` / `requeue(builder, key)` | inspect parked tasks and put one back |
 | `invalidate(builder)` | queue every task of a builder (its code changed); downstream re-runs only where outputs change |
@@ -188,7 +188,7 @@ const render: BuilderDef = {
   outputs: ["content", "screenshots"],  // writes two collections
   async run(ctx) {
     const html = String(await ctx.get("files", ctx.key));
-    const config = (await ctx.get("configs", "render")) as { viewports: string[] };
+    const config = ((await ctx.get("configs", "render")) ?? { viewports: [] }) as { viewports: string[] };
     ctx.emit("content", ctx.key, extractText(html));
     for (const viewport of config.viewports) {
       const png = await screenshot(html, viewport);      // write the image wherever you keep artifacts…
@@ -222,7 +222,8 @@ const page: BuilderDef = {
 };
 ```
 
-Both are executed in `tests/multi-io.test.ts`.
+`tests/multi-io.test.ts` runs both shapes (with stand-ins for `extractText`, `screenshot` and
+`hash`).
 
 ### Dynamic dependencies: a compiler following imports
 

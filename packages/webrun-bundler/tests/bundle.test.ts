@@ -93,7 +93,7 @@ exports.shout = function (s) {
 
 const APP = `import cjs from "cjs-pkg";
 import { greet } from "esm-pkg";
-import data from "../src/data.json";
+import data from "./data.json";
 
 export async function main(name: string): Promise<string> {
   const g = (await greet(name)) + "MARK_APP_AWAIT".slice(99);

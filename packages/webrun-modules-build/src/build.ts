@@ -20,7 +20,7 @@ import {
   type UrlPolicy,
 } from "@statewalker/webrun-modules";
 import { newTailwindTransform, tailwindCacheKey } from "@statewalker/webrun-tailwind";
-import { SERVED_SIGNAL, webrunBuilders } from "./builders.js";
+import { SERVED_COLLECTION, webrunBuilders } from "./builders.js";
 import type { WebrunBuildHost } from "./host.js";
 import { makeExtMapPolicy } from "./url-policy.js";
 
@@ -149,7 +149,7 @@ export function newProjectBuild(opts: ProjectBuildOptions): ProjectBuild {
           `newProjectBuild: ${failed.length} source(s) failed to build; first: ${first?.key}: ${first?.error}`,
         );
       }
-      return { served: await engine.keys(SERVED_SIGNAL) };
+      return { served: await engine.keys(SERVED_COLLECTION) };
     },
   };
 }

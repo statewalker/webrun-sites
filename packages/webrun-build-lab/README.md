@@ -2,20 +2,20 @@
 
 An exploration lab for **one** incremental build engine to replace the three overlapping packages:
 `webrun-dataflow` (graph + watermark stores), `webrun-builder` (stage-level frontier scheduler over
-files) and `webrun-builders` (key-level SQLite engine with provenance). Three alternative prototypes
+files) and `webrun-cells` (key-level SQLite engine with provenance). Three alternative prototypes
 are built red/green against one conformance suite, then compared on the same workload.
 
 ## What is here
 
 | Path | What |
 |---|---|
-| `src/core/types.ts` | The common contract: collections (`key → JSON` collections), map/reduce builders, tracked `get`/`list` reads (dynamic dependencies), `emit`, one producer per row, retraction, early cut-off, glitch-freedom, crash resumability. |
+| `src/core/types.ts` | The common contract: collections (named sets of `key → JSON` rows), map/reduce builders, tracked `get`/`list` reads (dynamic dependencies), `emit`, one producer per row, retraction, early cut-off, glitch-freedom, crash resumability. |
 | `src/core/kv.ts` | The storage port: ordered KV with prefix scans and atomic batch commits. `MemKV` (with I/O counters), `CrashingKV` (kills the process before the N-th commit). |
 | `src/core/sql-kv.ts` | The same port over `SqlDriver` (node:sqlite, Durable Objects, D1). |
 | `src/core/fixtures.ts` | Builders used by tests and benchmarks: split/upper (fan-out chain), len/double (cut-off point), stats (reduce), left/right/join (diamond), compile/bundle (dynamic imports). |
 | `src/prototypes/naive.ts` | **P0** full recompute: the reference semantics and the baseline. |
 | `src/prototypes/cursors.ts` | **A** changelog cursors (webrun-dataflow / webrun-builder lineage). |
-| `src/prototypes/queue.ts` | **B** eager dirty queue + reverse-dependency index (webrun-builders lineage). |
+| `src/prototypes/queue.ts` | **B** eager dirty queue + reverse-dependency index (webrun-cells lineage). |
 | `src/prototypes/traces.ts` | **C** pull / verifying traces (Salsa, Shake, "Build Systems à la Carte"). |
 | `tests/conformance.ts` | 24 tests run against every prototype, incl. a crash at *every* commit followed by resume (state must equal the oracle, rework ≤ a clean run) and a randomized model check against P0. |
 | `tests/builder.test.ts` | The suite against the real engine (`webrun-builder`): batch 1, batch 64, concurrency 4, SQLite. |
@@ -26,7 +26,7 @@ are built red/green against one conformance suite, then compared on the same wor
 pnpm test:massive              # massive tier; MASSIVE_SCALE=3 pnpm test:massive for more
 pnpm test                      # 193 tests: suite × {A, B, C, B-on-SQLite, R ×4 configs} + P0
 pnpm bench -- 5000             # all engines, N docs + N modules
-pnpm tsx bench/static.ts 2000  # B vs the existing webrun-builders, both on SQLite
+pnpm tsx bench/static.ts 2000  # B vs the existing webrun-cells, both on SQLite
 ```
 
 ### Massive tests
@@ -100,7 +100,7 @@ change); C's verification grows 5× (proportional to the number of traces of tou
 Full numbers: `bench/results/bench-{1000,5000}.md`.
 
 On SQLite (`bench/static.ts`, N=2000, static pipeline), before it was deleted the existing
-`webrun-builders` engine took 2.9 s for a cold build, 4.2 ms for one edit and 43 ms for 1%; R takes
+`webrun-cells` engine took 2.9 s for a cold build, 4.2 ms for one edit and 43 ms for 1%; R takes
 2.7 s, 2.3 ms and 29 ms — while also supporting dynamic reads, reduce builders and `dispose`.
 
 ### Verdict: B is the basis for the real implementation (now `@statewalker/webrun-builder`)

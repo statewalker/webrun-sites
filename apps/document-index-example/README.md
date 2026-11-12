@@ -25,7 +25,7 @@ const index = await openDocumentIndex({
 });
 
 await index.update();                                    // scan + incremental build + flush
-const hits = await index.search("perovskite tandem builders", { topK: 10 });
+const hits = await index.search("perovskite tandem cells", { topK: 10 });
 // [{ path: "solar.pdf", chunk: 3, text: "…", score: 0.031 }, …]
 ```
 

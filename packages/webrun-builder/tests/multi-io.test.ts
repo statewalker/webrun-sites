@@ -87,15 +87,25 @@ describe("several inputs, several outputs: configs + files → content + screens
   });
 
   it("per-file config (join on the key): either input changing re-runs that key only", async () => {
-    const engine = new BuildEngine({ store: new MemKV(), builders: [pageBuilder] });
+    const ran: string[] = [];
+    const tracked: BuilderDef = {
+      ...pageBuilder,
+      run(ctx) {
+        ran.push(ctx.key);
+        return pageBuilder.run(ctx);
+      },
+    };
+    const engine = new BuildEngine({ store: new MemKV(), builders: [tracked] });
     await engine.put("files", "a", "alpha");
     await engine.put("files", "b", "beta");
     await engine.put("configs", "a", { viewports: ["desktop", "mobile"] } as unknown as Json);
     await engine.run();
     expect(await engine.keys("screenshots")).toEqual(["a@desktop", "a@mobile", "b@default"]);
 
+    ran.length = 0;
     await engine.put("configs", "b", { viewports: ["print"] } as unknown as Json);
     await engine.run();
+    expect(ran).toEqual(["b"]);
     expect(await engine.keys("screenshots")).toEqual(["a@desktop", "a@mobile", "b@print"]);
 
     await engine.remove("files", "a"); // config a remains: the task lives, emits nothing

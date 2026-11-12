@@ -1,7 +1,7 @@
 /**
  * Static-pipeline benchmark on node:sqlite (in memory) vs MemKV: prototype B
  * and the real engine (`@statewalker/webrun-builder`), so wall times on a real
- * database are comparable. (The removed `webrun-builders` engine was measured here
+ * database are comparable. (The removed `webrun-cells` engine was measured here
  * before it was deleted; see README.)
  *
  *   pnpm tsx bench/static.ts 2000

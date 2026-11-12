@@ -146,11 +146,14 @@ in GitHub) and provenance, and tags a GitHub release per package. Add a
 changeset yourself (`pnpm changeset`) to choose the bump level or the changelog
 text. Dependency updates come from Renovate.
 
-Set-up the pipeline needs once: npm's trusted publisher for each package names
+One-time set-up: npm's trusted publisher for each package names
 this repository, `ci.yml` and the `npm` environment; the `npm` environment has no
 required reviewers (add some to gate releases behind an approval); the workflow
 token may push to `main` (branch protection must allow `github-actions[bot]`).
-A brand-new package's first version is published by hand.
+A package npm has never seen is skipped with a warning until its first version is
+published by hand. When `main` moves on while a release runs, that run steps aside
+and the newer merge's run releases everything; the version commit gets no CI run
+of its own.
 
 ### Configuration files
 
