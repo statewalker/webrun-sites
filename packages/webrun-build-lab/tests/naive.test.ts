@@ -6,7 +6,7 @@ import { NaiveEngine } from "../src/prototypes/naive.js";
 describe("P0 naive — reference semantics", () => {
   it("computes, retracts, and skips a run when no source changed", async () => {
     const kv = new MemKV();
-    const e = new NaiveEngine({ kv, cells: [stats, upper, split, len] });
+    const e = new NaiveEngine({ kv, builders: [stats, upper, split, len] });
     await e.put("docs", "a", "hello world");
     await e.put("docs", "b", "x");
     expect((await e.run()).executed).toBe(8); // split×2 + len×2 + upper×3 + stats

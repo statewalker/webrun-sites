@@ -8,7 +8,7 @@
  *                                              ▼                          ▼
  *                                   full-text sub-index          vector sub-index
  *
- * Every arrow is a map cell: one task per document (extract, chunk) or per
+ * Every arrow is a map builder: one task per document (extract, chunk) or per
  * chunk (embed, index-text, index-vectors). The engine runs only tasks whose
  * inputs changed, so:
  *
@@ -25,7 +25,7 @@
  * row is set before a run and cleared after the index is flushed; if a process
  * finds it set — or finds an empty index while the engine says chunks were
  * indexed — it rebuilds the index from the stored chunks and embeddings
- * (`invalidate` on the two index cells), without extracting or embedding again.
+ * (`invalidate` on the two index builders), without extracting or embedding again.
  */
 import { pdfExtractor } from "@statewalker/content-extractors";
 import type {
@@ -41,7 +41,7 @@ import { createMiniSearchIndexer } from "@statewalker/indexer-mem-minisearch";
 import { newVectorAccess } from "@statewalker/indexer-vector";
 import {
   type BuildEngine,
-  type CellDef,
+  type BuilderDef,
   createBuildEngine,
   type PersistenceConfig,
   type ScanResult,
@@ -153,7 +153,7 @@ export async function openDocumentIndex(opts: DocumentIndexOptions): Promise<Doc
   /** An `update()` is in progress: its run may commit index changes after any flush. */
   let updating = 0;
 
-  const cells: CellDef[] = [
+  const builders: BuilderDef[] = [
     {
       id: "extract",
       inputs: [FILES],
@@ -233,7 +233,7 @@ export async function openDocumentIndex(opts: DocumentIndexOptions): Promise<Doc
   ];
 
   const engine = await createBuildEngine({
-    cells,
+    builders,
     persistence: opts.persistence,
     concurrency: opts.concurrency ?? 4,
     batchSize: 128,
@@ -267,7 +267,7 @@ export async function openDocumentIndex(opts: DocumentIndexOptions): Promise<Doc
       const scanned = await scanSources(engine, {
         files: opts.files,
         root: opts.root,
-        signal: FILES,
+        collection: FILES,
       });
       // Mark the index dirty while engine commits may run ahead of its flush.
       await engine.put(SYS, "index-dirty", true);

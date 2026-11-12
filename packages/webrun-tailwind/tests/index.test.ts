@@ -1,6 +1,6 @@
 import type { PreprocessContext } from "@statewalker/webrun-modules";
 import { describe, expect, it } from "vitest";
-import { generateTailwindCss, TAILWIND_VERSION, tailwindCacheKey } from "./index.js";
+import { generateTailwindCss, TAILWIND_VERSION, tailwindCacheKey } from "../src/index.js";
 
 // A source with no project `@import` never touches ctx.files, so a bare ctx suffices.
 const noCtx = {} as PreprocessContext;

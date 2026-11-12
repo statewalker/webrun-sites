@@ -10,7 +10,7 @@ import {
  *  final URL is a pure function of the specifier name (content-independent). A JSON
  *  import becomes a `serveJsonModule` `.js`; a CSS import from JS becomes a
  *  `cssModuleWrapper` injector `.js` (emit forms wired in the build's Preprocess
- *  cell). Anything else is left as-is. */
+ *  builder). Anything else is left as-is. */
 function extMap(path: string): string {
   return path
     .replace(/\.(?:m|c)?[jt]sx?$/i, ".js")

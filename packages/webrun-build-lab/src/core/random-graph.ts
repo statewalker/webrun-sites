@@ -1,38 +1,38 @@
 /**
- * Random cell graphs for massive tests: many signals, many cells of mixed
+ * Random builder graphs for massive tests: many collections, many builders of mixed
  * behaviour (transform, cut-off, filter, fan-out, multi-input join, dynamic
  * reads, reduce, group-by reduce), deterministic so every engine and the
  * oracle compute the same thing.
  *
  * Construction guarantees the contract's preconditions: the graph is a DAG
- * (cells only read signals created before their outputs), every derived signal
- * has exactly one producing cell, and output keys are unique per task, so no
+ * (builders only read collections created before their outputs), every derived collection
+ * has exactly one producing builder, and output keys are unique per task, so no
  * two tasks ever emit the same row.
  */
 import { rng } from "./fixtures.js";
-import type { CellDef, Json } from "./types.js";
+import type { BuilderDef, Json } from "./types.js";
 
 export interface GraphSpec {
   seed: number;
-  /** Source signals. */
+  /** Source collections. */
   sources: number;
-  /** Cells to generate. */
-  cells: number;
+  /** Builders to generate. */
+  builders: number;
   /** Size of the source key universe (`k0…k{n-1}`). */
   keys: number;
 }
 
 export interface RandomGraph {
-  cells: CellDef[];
+  builders: BuilderDef[];
   sources: string[];
-  /** Every derived signal (for snapshots). */
+  /** Every derived collection (for snapshots). */
   derived: string[];
   /** Generate a random source edit. */
   edit(rand: () => number):
-    | { op: "put"; signal: string; key: string; value: Json }
+    | { op: "put"; collection: string; key: string; value: Json }
     | {
         op: "remove";
-        signal: string;
+        collection: string;
         key: string;
       };
   keyAt(i: number): string;
@@ -77,27 +77,27 @@ export function randomGraph(spec: GraphSpec): RandomGraph {
   const rand = rng(spec.seed);
   const pick = <T>(xs: readonly T[]) => xs[Math.floor(rand() * xs.length)] as T;
   const sources = Array.from({ length: spec.sources }, (_, i) => `src${i}`);
-  // Signals readable by later cells; reduce outputs have few keys, so map cells
-  // are keyed by "keyed" signals only (to keep task counts meaningful).
+  // Collections readable by later builders; reduce outputs have few keys, so map builders
+  // are keyed by "keyed" collections only (to keep task counts meaningful).
   const keyed: string[] = [...sources];
   const all: string[] = [...sources];
   const derived: string[] = [];
-  const cells: CellDef[] = [];
+  const builders: BuilderDef[] = [];
   const keyAt = (i: number) => `k${i}`;
 
-  for (let c = 0; c < spec.cells; c++) {
+  for (let c = 0; c < spec.builders; c++) {
     const id = `c${c}`;
     const kind = pick(KINDS);
     const out = `s${c}`;
-    // Prefer recent signals so the graph gets deep, not only wide.
+    // Prefer recent collections so the graph gets deep, not only wide.
     const recent = (xs: string[]) =>
       xs[Math.max(0, xs.length - 1 - Math.floor(rand() * Math.min(xs.length, 6)))] as string;
     const input = recent(keyed);
     const salt = c;
-    let cell: CellDef;
+    let builder: BuilderDef;
     switch (kind) {
       case "transform":
-        cell = {
+        builder = {
           id,
           inputs: [input],
           outputs: [out],
@@ -108,7 +108,7 @@ export function randomGraph(spec: GraphSpec): RandomGraph {
         break;
       case "cutoff":
         // Tiny codomain: most upstream changes are cut off here.
-        cell = {
+        builder = {
           id,
           inputs: [input],
           outputs: [out],
@@ -118,7 +118,7 @@ export function randomGraph(spec: GraphSpec): RandomGraph {
         };
         break;
       case "filter":
-        cell = {
+        builder = {
           id,
           inputs: [input],
           outputs: [out],
@@ -129,7 +129,7 @@ export function randomGraph(spec: GraphSpec): RandomGraph {
         };
         break;
       case "fanout":
-        cell = {
+        builder = {
           id,
           inputs: [input],
           outputs: [out],
@@ -144,7 +144,7 @@ export function randomGraph(spec: GraphSpec): RandomGraph {
       case "join": {
         const other = pick(keyed.filter((s) => s !== input));
         const inputs = other ? [input, other] : [input];
-        cell = {
+        builder = {
           id,
           inputs,
           outputs: [out],
@@ -157,10 +157,10 @@ export function randomGraph(spec: GraphSpec): RandomGraph {
         break;
       }
       case "dynamic": {
-        // Reads 1–3 rows of another signal, chosen by the value it read first.
+        // Reads 1–3 rows of another collection, chosen by the value it read first.
         const target = pick(all);
         const reads = target === input ? [] : [target];
-        cell = {
+        builder = {
           id,
           inputs: [input],
           reads,
@@ -179,7 +179,7 @@ export function randomGraph(spec: GraphSpec): RandomGraph {
         break;
       }
       case "reduce":
-        cell = {
+        builder = {
           id,
           kind: "reduce",
           inputs: [input],
@@ -191,7 +191,7 @@ export function randomGraph(spec: GraphSpec): RandomGraph {
         };
         break;
       case "groupby":
-        cell = {
+        builder = {
           id,
           kind: "reduce",
           inputs: [input],
@@ -207,22 +207,22 @@ export function randomGraph(spec: GraphSpec): RandomGraph {
         };
         break;
     }
-    cells.push(cell);
+    builders.push(builder);
     derived.push(out);
     all.push(out);
     if (kind !== "reduce" && kind !== "groupby") keyed.push(out);
   }
 
   return {
-    cells,
+    builders,
     sources,
     derived,
     keyAt,
     edit(r) {
-      const signal = sources[Math.floor(r() * sources.length)] as string;
+      const collection = sources[Math.floor(r() * sources.length)] as string;
       const key = keyAt(Math.floor(r() * spec.keys));
-      if (r() < 0.2) return { op: "remove", signal, key };
-      return { op: "put", signal, key, value: `v${Math.floor(r() * 1000)}` };
+      if (r() < 0.2) return { op: "remove", collection, key };
+      return { op: "put", collection, key, value: `v${Math.floor(r() * 1000)}` };
     },
   };
 }

@@ -26,7 +26,7 @@ tools/      private test harness (consumer-install)
 
 | Package | Description | npm |
 | --- | --- | --- |
-| [`@statewalker/webrun-builder`](packages/webrun-builder) | `BuildEngine`: key-level incremental, resumable build engine — cells over signals with dynamic dependencies, early cut-off, retraction and dead letters; state in a pluggable KV (memory, `FilesApi`, SQLite); `scanSources` for file trees. | [npm](https://www.npmjs.com/package/@statewalker/webrun-builder) |
+| [`@statewalker/webrun-builder`](packages/webrun-builder) | `BuildEngine`: key-level incremental, resumable build engine — builders over collections with dynamic dependencies, early cut-off, retraction and dead letters; state in a pluggable KV (memory, `FilesApi`, SQLite); `scanSources` for file trees. | [npm](https://www.npmjs.com/package/@statewalker/webrun-builder) |
 | [`@statewalker/webrun-modules`](packages/webrun-modules) | Isomorphic module server: resolves, downloads and transforms npm packages and authored TS/JS into ESM, served from a `FilesApi` cache. | [npm](https://www.npmjs.com/package/@statewalker/webrun-modules) |
 | [`@statewalker/webrun-modules-build`](packages/webrun-modules-build) | Batch module build: runs the `webrun-modules` transforms through `BuildEngine` and writes a static `.js`/`.css` tree. | [npm](https://www.npmjs.com/package/@statewalker/webrun-modules-build) |
 | [`@statewalker/webrun-tailwind`](packages/webrun-tailwind) | Build-only Tailwind CSS v4 transform for the `webrun-modules` transform registry (Node only). | [npm](https://www.npmjs.com/package/@statewalker/webrun-tailwind) |

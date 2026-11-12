@@ -2,12 +2,12 @@ import { readText, writeText } from "@statewalker/webrun-files";
 import { MemFilesApi } from "@statewalker/webrun-files-mem";
 import { type CssTransform, newDefaultCssTransform } from "@statewalker/webrun-modules";
 import { afterEach, describe, expect, it } from "vitest";
-import { newProjectBuild } from "./index.js";
+import { newProjectBuild } from "../src/index.js";
 
 /** A CSS transform that delegates to the real one but counts the *generic*
  *  Tailwind generation pass — the only call whose source is the multi-MB
  *  all-classes stylesheet (project stylesheets + specifier-capture passes are tiny).
- *  `big` is the reliable signal that `generateTailwindCss` actually ran. */
+ *  `big` is the reliable collection that `generateTailwindCss` actually ran. */
 function spyCss(): CssTransform & { big: number } {
   const real = newDefaultCssTransform();
   const spy = {

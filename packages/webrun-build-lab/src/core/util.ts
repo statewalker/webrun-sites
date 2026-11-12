@@ -58,19 +58,19 @@ export function errorText(error: unknown): string {
 }
 
 /**
- * The static signal-level topology (order, ranks, readers, validation) — the
+ * The static collection-level topology (order, ranks, readers, validation) — the
  * same one the real engine uses, so prototypes schedule identically.
  */
 import { Topology as EngineTopology } from "@statewalker/webrun-builder";
-import type { CellDef } from "./types.js";
+import type { BuilderDef } from "./types.js";
 
-/** The engine's topology, typed with the lab's cell contract (no incremental reduce). */
+/** The engine's topology, typed with the lab's builder contract (no incremental reduce). */
 export class Topology extends EngineTopology {
-  constructor(cells: readonly CellDef[]) {
-    super(cells as unknown as ConstructorParameters<typeof EngineTopology>[0]);
+  constructor(builders: readonly BuilderDef[]) {
+    super(builders as unknown as ConstructorParameters<typeof EngineTopology>[0]);
   }
 
-  override cell(id: string): CellDef {
-    return super.cell(id) as unknown as CellDef;
+  override builder(id: string): BuilderDef {
+    return super.builder(id) as unknown as BuilderDef;
   }
 }

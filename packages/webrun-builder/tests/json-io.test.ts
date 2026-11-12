@@ -1,6 +1,6 @@
 import { MemFilesApi } from "@statewalker/webrun-files-mem";
 import { describe, expect, it } from "vitest";
-import { tryReadJson, writeJsonAtomic } from "./json-io.js";
+import { tryReadJson, writeJsonAtomic } from "../src/json-io.js";
 
 describe("writeJsonAtomic", () => {
   it("round-trips JSON and creates parent directories", async () => {

@@ -7,19 +7,20 @@ import { defineConformance } from "./conformance.js";
 // one task per commit, the default group commit, concurrent execution, SQLite.
 defineConformance(
   "R webrun-builder (batch 1)",
-  ({ kv, cells, maxAttempts }) => new BuildEngine({ store: kv, cells, maxAttempts, batchSize: 1 }),
+  ({ kv, builders, maxAttempts }) =>
+    new BuildEngine({ store: kv, builders, maxAttempts, batchSize: 1 }),
 );
 defineConformance(
   "R webrun-builder (batch 64)",
-  ({ kv, cells, maxAttempts }) => new BuildEngine({ store: kv, cells, maxAttempts }),
+  ({ kv, builders, maxAttempts }) => new BuildEngine({ store: kv, builders, maxAttempts }),
 );
 defineConformance(
   "R webrun-builder (batch 64, concurrency 4)",
-  ({ kv, cells, maxAttempts }) =>
-    new BuildEngine({ store: kv, cells, maxAttempts, concurrency: 4 }),
+  ({ kv, builders, maxAttempts }) =>
+    new BuildEngine({ store: kv, builders, maxAttempts, concurrency: 4 }),
 );
 defineConformance(
   "R webrun-builder over SQLite",
-  ({ kv, cells, maxAttempts }) => new BuildEngine({ store: kv, cells, maxAttempts }),
+  ({ kv, builders, maxAttempts }) => new BuildEngine({ store: kv, builders, maxAttempts }),
   () => new SqlKV(new NodeSqlDriver(new DatabaseSync(":memory:"))),
 );

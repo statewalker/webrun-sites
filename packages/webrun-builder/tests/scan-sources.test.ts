@@ -1,12 +1,18 @@
 import { writeText } from "@statewalker/webrun-files";
 import { MemFilesApi } from "@statewalker/webrun-files-mem";
 import { describe, expect, it } from "vitest";
-import { BuildEngine, type CellDef, MemKV, SOURCES_SIGNAL, scanSources } from "./index.js";
+import {
+  BuildEngine,
+  type BuilderDef,
+  MemKV,
+  SOURCES_COLLECTION,
+  scanSources,
+} from "../src/index.js";
 
 const tick = () => new Promise((r) => setTimeout(r, 5));
 
 describe("scanSources", () => {
-  it("mirrors a tree into the source signal: changes, removals, ignores", async () => {
+  it("mirrors a tree into the source collection: changes, removals, ignores", async () => {
     const files = new MemFilesApi();
     await writeText(files, "proj/a.txt", "a");
     await writeText(files, "proj/sub/b.txt", "b");
@@ -14,16 +20,16 @@ describe("scanSources", () => {
     await writeText(files, "proj/app.log", "x");
     await writeText(files, "proj/.projectignore", "*.log\n");
     const log: string[] = [];
-    const echo: CellDef = {
+    const echo: BuilderDef = {
       id: "echo",
-      inputs: [SOURCES_SIGNAL],
+      inputs: [SOURCES_COLLECTION],
       outputs: ["out"],
       run(ctx) {
         log.push(ctx.key);
         ctx.emit("out", ctx.key, true);
       },
     };
-    const engine = new BuildEngine({ store: new MemKV(), cells: [echo] });
+    const engine = new BuildEngine({ store: new MemKV(), builders: [echo] });
     const scan = () => scanSources(engine, { files, root: "proj" });
 
     expect(await scan()).toEqual({ seen: 2, changed: 2, removed: 0 });
@@ -49,7 +55,7 @@ describe("scanSources", () => {
   it("a content fingerprint ignores touches", async () => {
     const files = new MemFilesApi();
     await writeText(files, "p/x.ts", "same");
-    const engine = new BuildEngine({ store: new MemKV(), cells: [] });
+    const engine = new BuildEngine({ store: new MemKV(), builders: [] });
     const fingerprint = async () => "content-hash";
     await scanSources(engine, { files, root: "p", fingerprint });
     await tick();

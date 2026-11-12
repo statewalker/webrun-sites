@@ -37,7 +37,7 @@ export function isAsset(id: string): boolean {
  * and a `url("./logo.png")` asset is copied verbatim to its ext-map path.
  *
  * Idempotent: re-running over the same ids rewrites identical bytes. The caller
- * (Preprocess cell) passes only freshly-emitted CSS ids so a gate-skipped node's
+ * (Preprocess builder) passes only freshly-emitted CSS ids so a gate-skipped node's
  * already-wrapped `.js` is never double-wrapped.
  */
 export async function emitBuildForms(ids: string[], ctx: PreprocessContext): Promise<void> {

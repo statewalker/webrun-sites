@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
 import { recorded, recorder, rng, snapshot } from "../src/core/fixtures.js";
 import { CrashError, CrashingKV, type KV, MemKV } from "../src/core/kv.js";
 import { hash, type RandomGraph, randomGraph } from "../src/core/random-graph.js";
-import type { CellDef, Engine, EngineFactory, Json } from "../src/core/types.js";
+import type { BuilderDef, Engine, EngineFactory, Json } from "../src/core/types.js";
 import { CursorEngine } from "../src/prototypes/cursors.js";
 import { NaiveEngine } from "../src/prototypes/naive.js";
 import { QueueEngine } from "../src/prototypes/queue.js";
@@ -28,7 +28,7 @@ const ENGINES: Record<string, EngineFactory> = {
   "A cursors": (o) => new CursorEngine(o),
   "B queue": (o) => new QueueEngine(o),
   "C traces": (o) => new TraceEngine(o),
-  "R builder": (o) => new BuildEngine({ store: o.kv, cells: o.cells, concurrency: 4 }),
+  "R builder": (o) => new BuildEngine({ store: o.kv, builders: o.builders, concurrency: 4 }),
 };
 
 async function drain(engine: Engine): Promise<number> {
@@ -44,8 +44,8 @@ type Edit = ReturnType<RandomGraph["edit"]>;
 
 async function apply(engine: Engine, edits: Edit[]): Promise<void> {
   for (const e of edits) {
-    if (e.op === "put") await engine.put(e.signal, e.key, e.value);
-    else await engine.remove(e.signal, e.key);
+    if (e.op === "put") await engine.put(e.collection, e.key, e.value);
+    else await engine.remove(e.collection, e.key);
   }
 }
 
@@ -59,16 +59,16 @@ async function apply(engine: Engine, edits: Edit[]): Promise<void> {
  */
 function oncePerKey(edits: Edit[]): Edit[] {
   const last = new Map<string, Edit>();
-  for (const e of edits) last.set(`${e.signal}/${e.key}`, e);
+  for (const e of edits) last.set(`${e.collection}/${e.key}`, e);
   return [...last.values()];
 }
 
 function initialRows(g: RandomGraph, keys: number, seed: number): Edit[] {
   const rand = rng(seed);
   const out: Edit[] = [];
-  for (const signal of g.sources) {
+  for (const collection of g.sources) {
     for (let i = 0; i < keys; i++) {
-      if (rand() < 0.7) out.push({ op: "put", signal, key: g.keyAt(i), value: `v${i % 97}` });
+      if (rand() < 0.7) out.push({ op: "put", collection, key: g.keyAt(i), value: `v${i % 97}` });
     }
   }
   return out;
@@ -76,20 +76,20 @@ function initialRows(g: RandomGraph, keys: number, seed: number): Edit[] {
 
 describe("massive — random graphs", () => {
   const specs = [
-    { seed: 11, sources: 3, cells: n(30), keys: n(600) },
-    { seed: 12, sources: 5, cells: n(60), keys: n(300) },
+    { seed: 11, sources: 3, builders: n(30), keys: n(600) },
+    { seed: 12, sources: 5, builders: n(60), keys: n(300) },
   ];
 
   for (const spec of specs) {
     it(
-      `${spec.cells} cells × ${spec.keys} keys × ${spec.sources} sources (seed ${spec.seed}): ` +
+      `${spec.builders} builders × ${spec.keys} keys × ${spec.sources} sources (seed ${spec.seed}): ` +
         "every engine equals the oracle and all execute the same tasks",
       async () => {
         const g = randomGraph(spec);
-        const oracle = new NaiveEngine({ kv: new MemKV(), cells: g.cells });
+        const oracle = new NaiveEngine({ kv: new MemKV(), builders: g.builders });
         const engines = Object.entries(ENGINES).map(([name, f]) => ({
           name,
-          engine: f({ kv: new MemKV(), cells: g.cells }),
+          engine: f({ kv: new MemKV(), builders: g.builders }),
         }));
         const rand = rng(spec.seed * 7);
         const rounds: Edit[][] = [initialRows(g, spec.keys, spec.seed)];
@@ -123,23 +123,23 @@ describe("massive — random graphs", () => {
 });
 
 describe("massive — crash storms", () => {
-  const spec = { seed: 21, sources: 3, cells: n(25), keys: n(400) };
+  const spec = { seed: 21, sources: 3, builders: n(25), keys: n(400) };
 
   for (const [name, factory] of [
     [
       "R builder (batch 16)",
-      (kv: KV, cells: CellDef[]) => new BuildEngine({ store: kv, cells, batchSize: 16 }),
+      (kv: KV, builders: BuilderDef[]) => new BuildEngine({ store: kv, builders, batchSize: 16 }),
     ],
-    ["B queue", (kv: KV, cells: CellDef[]) => new QueueEngine({ kv, cells })],
-    ["A cursors", (kv: KV, cells: CellDef[]) => new CursorEngine({ kv, cells })],
-    ["C traces", (kv: KV, cells: CellDef[]) => new TraceEngine({ kv, cells })],
+    ["B queue", (kv: KV, builders: BuilderDef[]) => new QueueEngine({ kv, builders })],
+    ["A cursors", (kv: KV, builders: BuilderDef[]) => new CursorEngine({ kv, builders })],
+    ["C traces", (kv: KV, builders: BuilderDef[]) => new TraceEngine({ kv, builders })],
   ] as const) {
     it(
       `${name}: repeated crashes at random commits during cold and incremental builds converge to the oracle`,
       async () => {
         const g = randomGraph(spec);
         const rand = rng(99);
-        const oracle = new NaiveEngine({ kv: new MemKV(), cells: g.cells });
+        const oracle = new NaiveEngine({ kv: new MemKV(), builders: g.builders });
         const kv = new MemKV();
         let crashes = 0;
         let executed = 0;
@@ -151,13 +151,13 @@ describe("massive — crash storms", () => {
         for (const edits of phases) {
           await apply(oracle, edits);
           await oracle.run();
-          await apply(factory(kv, g.cells), edits);
+          await apply(factory(kv, g.builders), edits);
           // Crash again and again until one process finishes the build.
           for (;;) {
             const rec = recorder();
             const crashing = factory(
               new CrashingKV(kv, 1 + Math.floor(rand() * 40)),
-              recorded(rec, g.cells),
+              recorded(rec, g.builders),
             );
             try {
               executed += await drain(crashing);
@@ -167,11 +167,11 @@ describe("massive — crash storms", () => {
               crashes++;
             }
           }
-          expect(await snapshot(factory(kv, g.cells), g.derived)).toEqual(
+          expect(await snapshot(factory(kv, g.builders), g.derived)).toEqual(
             await snapshot(oracle, g.derived),
           );
           // A finished store has nothing left to do.
-          expect(await drain(factory(kv, g.cells))).toBe(0);
+          expect(await drain(factory(kv, g.builders))).toBe(0);
         }
         expect(crashes).toBeGreaterThan(SCALE >= 1 ? 5 : 1); // small scales commit (and so crash) less
         expect(executed).toBeGreaterThan(0);
@@ -185,7 +185,7 @@ describe("massive — volumes on real stores", () => {
   it(
     "R over SQLite and over FilesKV equals R over MemKV on a large graph; reopening resumes with no work",
     async () => {
-      const g = randomGraph({ seed: 31, sources: 4, cells: n(40), keys: n(1500) });
+      const g = randomGraph({ seed: 31, sources: 4, builders: n(40), keys: n(1500) });
       const rand = rng(3);
       const edits = [
         initialRows(g, n(1500), 31),
@@ -199,7 +199,11 @@ describe("massive — volumes on real stores", () => {
       ];
       const snaps: Record<string, unknown> = {};
       for (const [name, open] of stores) {
-        const engine = new BuildEngine({ store: await open(), cells: g.cells, batchSize: 128 });
+        const engine = new BuildEngine({
+          store: await open(),
+          builders: g.builders,
+          batchSize: 128,
+        });
         for (const round of edits) {
           await apply(engine, round);
           await drain(engine);
@@ -211,7 +215,7 @@ describe("massive — volumes on real stores", () => {
       // A new process over the persisted files: same state, nothing to do.
       const reopened = new BuildEngine({
         store: await FilesKV.open(files, "state"),
-        cells: g.cells,
+        builders: g.builders,
       });
       expect(await drain(reopened)).toBe(0);
       expect(await snapshot(reopened, g.derived)).toEqual(snaps.mem);
@@ -221,14 +225,15 @@ describe("massive — volumes on real stores", () => {
 });
 
 describe("massive — extreme shapes (R builder)", () => {
-  const make = (cells: CellDef[]) => new BuildEngine({ store: new MemKV(), cells, batchSize: 256 });
+  const make = (builders: BuilderDef[]) =>
+    new BuildEngine({ store: new MemKV(), builders, batchSize: 256 });
 
   it(
     "a deep chain: one edit at the source runs exactly one task per stage",
     async () => {
       const depth = n(150);
       const keys = n(500);
-      const cells: CellDef[] = Array.from({ length: depth }, (_, i) => {
+      const builders: BuilderDef[] = Array.from({ length: depth }, (_, i) => {
         const input = i === 0 ? "src" : `s${i - 1}`;
         const out = `s${i}`;
         return {
@@ -242,7 +247,7 @@ describe("massive — extreme shapes (R builder)", () => {
         };
       });
       const rec = recorder();
-      const engine = make(recorded(rec, cells));
+      const engine = make(recorded(rec, builders));
       for (let k = 0; k < keys; k++) await engine.put("src", `k${k}`, `v${k}`);
       expect(await drain(engine)).toBe(depth * keys);
       rec.reset();
@@ -257,11 +262,11 @@ describe("massive — extreme shapes (R builder)", () => {
   );
 
   it(
-    "a wide fan-out/fan-in: hundreds of cells over one source, one reduce over all of them",
+    "a wide fan-out/fan-in: hundreds of builders over one source, one reduce over all of them",
     async () => {
       const width = n(300);
       const keys = n(200);
-      const branches: CellDef[] = Array.from({ length: width }, (_, i) => ({
+      const branches: BuilderDef[] = Array.from({ length: width }, (_, i) => ({
         id: `b${i}`,
         inputs: ["src"],
         outputs: [`w${i}`],
@@ -269,7 +274,7 @@ describe("massive — extreme shapes (R builder)", () => {
           ctx.emit(`w${i}`, ctx.key, `${i}:${await ctx.get("src", ctx.key)}`);
         },
       }));
-      const total: CellDef = {
+      const total: BuilderDef = {
         id: "total",
         kind: "reduce",
         inputs: branches.map((_, i) => `w${i}`),
@@ -301,7 +306,7 @@ describe("massive — extreme shapes (R builder)", () => {
     "a huge fan-out from one key, then a shrink: retraction cascades through tens of thousands of rows",
     async () => {
       const size = n(20000);
-      const explode: CellDef = {
+      const explode: BuilderDef = {
         id: "explode",
         inputs: ["src"],
         outputs: ["parts"],
@@ -311,7 +316,7 @@ describe("massive — extreme shapes (R builder)", () => {
             ctx.emit("parts", `${ctx.key}#${String(i).padStart(6, "0")}`, i);
         },
       };
-      const square: CellDef = {
+      const square: BuilderDef = {
         id: "square",
         inputs: ["parts"],
         outputs: ["squares"],
@@ -338,7 +343,7 @@ describe("massive — extreme shapes (R builder)", () => {
     async () => {
       const sources = n(20);
       const keys = n(1000);
-      const cells: CellDef[] = Array.from({ length: sources }, (_, i) => ({
+      const builders: BuilderDef[] = Array.from({ length: sources }, (_, i) => ({
         id: `m${i}`,
         inputs: [`src${i}`],
         outputs: [`out${i}`],
@@ -346,7 +351,7 @@ describe("massive — extreme shapes (R builder)", () => {
           ctx.emit(`out${i}`, ctx.key, String(await ctx.get(`src${i}`, ctx.key)).length);
         },
       }));
-      const engine = make(cells);
+      const engine = make(builders);
       for (let s = 0; s < sources; s++) {
         for (let k = 0; k < keys; k++) await engine.put(`src${s}`, `k${k}`, "x".repeat(k % 7));
       }

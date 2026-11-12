@@ -3,14 +3,14 @@ import { MemFilesApi } from "@statewalker/webrun-files-mem";
 import { NodeSqlDriver } from "@statewalker/webrun-files-sqlite";
 import { describe, expect, it } from "vitest";
 import {
-  type CellDef,
+  type BuilderDef,
   createBuildEngine,
   MemKV,
   openStore,
   type PersistenceConfig,
-} from "./index.js";
+} from "../src/index.js";
 
-const upper: CellDef = {
+const upper: BuilderDef = {
   id: "upper",
   inputs: ["docs"],
   outputs: ["up"],
@@ -21,7 +21,7 @@ const upper: CellDef = {
 
 describe("configurable persistence", () => {
   it("defaults to memory", async () => {
-    const engine = await createBuildEngine({ cells: [upper] });
+    const engine = await createBuildEngine({ builders: [upper] });
     await engine.put("docs", "a", "x");
     await engine.run();
     expect(await engine.get("up", "a")).toBe("X");
@@ -38,12 +38,12 @@ describe("configurable persistence", () => {
   it.each(durable)(
     "%s: state survives a new engine over the same configuration",
     async (_, cfg) => {
-      const e1 = await createBuildEngine({ cells: [upper], persistence: cfg() });
+      const e1 = await createBuildEngine({ builders: [upper], persistence: cfg() });
       for (const k of ["a", "b", "c"]) await e1.put("docs", k, k);
       await e1.run({ maxTasks: 2 });
       const log: string[] = [];
       const e2 = await createBuildEngine({
-        cells: [
+        builders: [
           {
             ...upper,
             run: (ctx) => {

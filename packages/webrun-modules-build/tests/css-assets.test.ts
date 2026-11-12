@@ -1,7 +1,7 @@
 import { readFile, readText, writeText } from "@statewalker/webrun-files";
 import { MemFilesApi } from "@statewalker/webrun-files-mem";
 import { describe, expect, it } from "vitest";
-import { newProjectBuild } from "./index.js";
+import { newProjectBuild } from "../src/index.js";
 
 describe("newProjectBuild — F2 @import-chained CSS", () => {
   it("emits a real /~/b.css alongside the a.js injector, keeping the @import specifier", async () => {

@@ -2,7 +2,7 @@ import { readText, writeText } from "@statewalker/webrun-files";
 import { MemFilesApi } from "@statewalker/webrun-files-mem";
 import type { PackageManifest, Source } from "@statewalker/webrun-modules";
 import { describe, expect, it } from "vitest";
-import { newProjectBuild } from "./index.js";
+import { newProjectBuild } from "../src/index.js";
 
 type Pkg = { version: string; manifest: Partial<PackageManifest>; files: Record<string, string> };
 

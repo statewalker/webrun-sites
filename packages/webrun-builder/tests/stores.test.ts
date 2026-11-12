@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { MemFilesApi } from "@statewalker/webrun-files-mem";
 import { NodeSqlDriver } from "@statewalker/webrun-files-sqlite";
 import { describe, expect, it } from "vitest";
-import { BuildEngine, type CellDef, FilesKV, type KV, MemKV, SqlKV } from "./index.js";
+import { BuildEngine, type BuilderDef, FilesKV, type KV, MemKV, SqlKV } from "../src/index.js";
 
 const stores: [string, () => Promise<KV>][] = [
   ["MemKV", async () => new MemKV()],
@@ -62,7 +62,7 @@ describe("FilesKV — persistence", () => {
   it("an engine over FilesKV resumes where the previous process stopped", async () => {
     const files = new MemFilesApi();
     const log: string[] = [];
-    const cell: CellDef = {
+    const builder: BuilderDef = {
       id: "up",
       inputs: ["docs"],
       outputs: ["up"],
@@ -73,12 +73,12 @@ describe("FilesKV — persistence", () => {
     };
     const e1 = new BuildEngine({
       store: await FilesKV.open(files, ".state"),
-      cells: [cell],
+      builders: [builder],
       batchSize: 1,
     });
     for (const key of ["a", "b", "c"]) await e1.put("docs", key, key);
     await e1.run({ maxTasks: 2 }); // "killed" after two tasks
-    const e2 = new BuildEngine({ store: await FilesKV.open(files, ".state"), cells: [cell] });
+    const e2 = new BuildEngine({ store: await FilesKV.open(files, ".state"), builders: [builder] });
     await e2.run();
     expect(log).toEqual(["a", "b", "c"]);
     expect(await e2.list("up")).toEqual([

@@ -2,7 +2,7 @@ import { readText, writeText } from "@statewalker/webrun-files";
 import { MemFilesApi } from "@statewalker/webrun-files-mem";
 import type { PackageManifest, Source } from "@statewalker/webrun-modules";
 import { describe, expect, it } from "vitest";
-import { newProjectBuild } from "./index.js";
+import { newProjectBuild } from "../src/index.js";
 
 /** In-memory Source serving fixed packages (no network) — mirrors build.test.ts. */
 function memSource(

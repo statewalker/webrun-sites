@@ -2,40 +2,40 @@
  * Prototype A: "changelog cursors" (push-by-log, consumer-driven discovery).
  *
  * Writes never fan out. Every row change gets a fresh global **stamp** and is
- * recorded once in its signal's changelog. Each consumer cell keeps a
+ * recorded once in its collection's changelog. Each consumer builder keeps a
  * **cursor** (a global stamp) and finds its work by range-scanning the
- * changelogs of the signals it depends on, from the cursor onwards. This is
+ * changelogs of the collections it depends on, from the cursor onwards. This is
  * the Kafka consumer-offset / webrun-dataflow UpdatesStore watermark idea.
  *
  * KV layout (parts joined with U+0000, see `k()`):
- *   r/<signal>/<key>             → `<seq>\0<owner>\0<json>`, or `<seq>\0<owner>` for a tombstone.
+ *   r/<collection>/<key>             → `<seq>\0<owner>\0<json>`, or `<seq>\0<owner>` for a tombstone.
  *                                  `seq` is the row's last stamp and `owner` is its producer
- *                                  task (`cell\u0002task`, "" for sources). Keeping the stamp
+ *                                  task (`builder\u0002task`, "" for sources). Keeping the stamp
  *                                  and owner in the row lets one `get` do early cut-off,
  *                                  conflict detection and changelog compaction.
- *   c/<signal>/<seq>/<key>       → "" : the changelog. It is compacted to one entry per key:
+ *   c/<collection>/<seq>/<key>       → "" : the changelog. It is compacted to one entry per key:
  *                                  a change deletes the key's previous entry.
- *   t/<cell>/<task>              → {b, o, d, l, dl?}: the task record. `b` ("built at") is the
+ *   t/<builder>/<task>              → {b, o, d, l, dl?}: the task record. `b` ("built at") is the
  *                                  global stamp at which the task's last execution began to
  *                                  read. `o` is its provenance (output rows), `d` its extra
- *                                  row reads, `l` the signals it listed, `dl` a dead-letter flag.
- *   rd/<cell>/<signal>/<key>/<task> : reverse index of extra row reads (`d`).
- *   rl/<cell>/<signal>/<task>       : reverse index of whole-signal reads (`l`).
- *   x/<cell>/<task>              → {attempts, error}: dead letters.
- *   m/stamp, m/cur/<cell>, m/rd/<cell>/<signal>, m/rl/<cell>/<signal>: the stamp counter,
- *                                  cursors, and "this cell has reverse deps on this signal" markers.
+ *                                  row reads, `l` the collections it listed, `dl` a dead-letter flag.
+ *   rd/<builder>/<collection>/<key>/<task> : reverse index of extra row reads (`d`).
+ *   rl/<builder>/<collection>/<task>       : reverse index of whole-collection reads (`l`).
+ *   x/<builder>/<task>              → {attempts, error}: dead letters.
+ *   m/stamp, m/cur/<builder>, m/rd/<builder>/<collection>, m/rl/<builder>/<collection>: the stamp counter,
+ *                                  cursors, and "this builder has reverse deps on this collection" markers.
  *
  * Reads that are implied by the task's key are not indexed: a map task reading
  * `get(input, ownKey)`, or a reduce task reading its inputs. The changelog entry
  * of that key (or any input entry, for a reduce) already maps to the task. So
- * the reverse index only holds genuinely dynamic reads, and the per-(cell, signal)
- * marker lets discovery skip reverse-index lookups for cells that have none.
+ * the reverse index only holds genuinely dynamic reads, and the per-(builder, collection)
+ * marker lets discovery skip reverse-index lookups for builders that have none.
  *
- * Run: cells are processed in topological order, in passes, until a pass finds
- * nothing. For one cell, discovery scans every dependency signal's changelog
+ * Run: builders are processed in topological order, in passes, until a pass finds
+ * nothing. For one builder, discovery scans every dependency collection's changelog
  * after the cursor. A key on an input becomes a candidate task (`"*"` for a
  * reduce). The `rd`/`rl` indexes map a key to the tasks that read it.
- * Each candidate carries the largest stamp that triggered it. Upstream cells
+ * Each candidate carries the largest stamp that triggered it. Upstream builders
  * finished their discovered work earlier in the pass, so execution is
  * glitch-free and a diamond's join runs once.
  *
@@ -46,7 +46,7 @@
  * changelog entries, its record (with the new `b`), its dep-index diff and its
  * dead-letter change, all applied atomically. The cursor is only an
  * optimisation that bounds the scan. It is persisted lazily, piggybacked on the
- * commit of the cell's last candidate. After a crash, the rescan from an older
+ * commit of the builder's last candidate. After a crash, the rescan from an older
  * cursor re-finds committed tasks and skips each one for the cost of a `get`.
  * So a resumed run never re-executes committed work.
  *
@@ -60,8 +60,8 @@
  * - Discovery reads the task record per candidate (to check `b`). With
  *   dynamic reads it also does one reverse-index scan per changelog entry and
  *   consumer.
- * - A consumer scans every entry of its dependency signals, even the ones it
- *   ignores (a `reads` signal where it depends on a few keys). Entries are
+ * - A consumer scans every entry of its dependency collections, even the ones it
+ *   ignores (a `reads` collection where it depends on a few keys). Entries are
  *   compacted per key, so this is bounded by the distinct keys changed.
  * - Commits go through one in-process lock, so stamps follow commit order. This
  *   is a single-writer design: one engine instance owns the KV at a time.
@@ -71,7 +71,7 @@
  */
 import type { KV } from "../core/kv.js";
 import {
-  type CellDef,
+  type BuilderDef,
   ConflictingEmission,
   type DeadLetter,
   type Engine,
@@ -111,7 +111,7 @@ interface Reads {
 type Outcome = "skipped" | "committed" | "stopped";
 
 const K_STAMP = k("m", "stamp");
-/** Separates cell and task in a row's owner (must differ from SEP, which splits the row value). */
+/** Separates builder and task in a row's owner (must differ from SEP, which splits the row value). */
 const OWNER_SEP = "\u0002";
 /** The character right above SEP: `seq + AFTER_SEP` sorts after every `seq SEP key`. */
 const AFTER_SEP = String.fromCharCode(SEP.charCodeAt(0) + 1);
@@ -135,7 +135,7 @@ export class CursorEngine implements Engine {
   readonly #kv: KV;
   readonly #topo: Topology;
   readonly #maxAttempts: number;
-  /** Dependency signals (inputs ∪ reads) per cell. */
+  /** Dependency collections (inputs ∪ reads) per builder. */
   readonly #deps = new Map<string, string[]>();
 
   // In-process caches. Each one is loaded from the KV on first use, so a new
@@ -143,7 +143,7 @@ export class CursorEngine implements Engine {
   #ready: Promise<void> | undefined;
   #stamp = 0; // last committed stamp
   #initStamp = 0; // stamp when this instance started
-  readonly #lastChange = new Map<string, number>(); // signal → upper bound of its last stamp
+  readonly #lastChange = new Map<string, number>(); // collection → upper bound of its last stamp
   readonly #cursor = new Map<string, number>();
   readonly #markers = new Map<string, boolean>();
   readonly #reduceBuilt = new Set<string>();
@@ -151,32 +151,32 @@ export class CursorEngine implements Engine {
 
   constructor(opts: EngineOptions) {
     this.#kv = opts.kv;
-    this.#topo = new Topology(opts.cells);
+    this.#topo = new Topology(opts.builders);
     this.#maxAttempts = opts.maxAttempts ?? 3;
-    for (const c of opts.cells)
+    for (const c of opts.builders)
       this.#deps.set(c.id, [...new Set([...c.inputs, ...(c.reads ?? [])])]);
   }
 
   // ---- public API --------------------------------------------------------
 
-  async put(signal: string, key: string, value: Json): Promise<void> {
-    this.#topo.assertSource(signal);
-    await this.#write(signal, key, canonicalJson(value));
+  async put(collection: string, key: string, value: Json): Promise<void> {
+    this.#topo.assertSource(collection);
+    await this.#write(collection, key, canonicalJson(value));
   }
 
-  async remove(signal: string, key: string): Promise<void> {
-    this.#topo.assertSource(signal);
-    await this.#write(signal, key, undefined);
+  async remove(collection: string, key: string): Promise<void> {
+    this.#topo.assertSource(collection);
+    await this.#write(collection, key, undefined);
   }
 
-  async get(signal: string, key: string): Promise<Json | undefined> {
-    const json = decodeRow(await this.#kv.get(k("r", signal, key)))?.json;
+  async get(collection: string, key: string): Promise<Json | undefined> {
+    const json = decodeRow(await this.#kv.get(k("r", collection, key)))?.json;
     return json === undefined ? undefined : (JSON.parse(json) as Json);
   }
 
-  async list(signal: string): Promise<{ key: string; value: Json }[]> {
+  async list(collection: string): Promise<{ key: string; value: Json }[]> {
     const out: { key: string; value: Json }[] = [];
-    for await (const [key, v] of this.#kv.scan(kp("r", signal))) {
+    for await (const [key, v] of this.#kv.scan(kp("r", collection))) {
       const json = decodeRow(v)?.json;
       if (json !== undefined) out.push({ key: split(key)[2] as string, value: JSON.parse(json) });
     }
@@ -186,8 +186,8 @@ export class CursorEngine implements Engine {
   async deadLetters(): Promise<DeadLetter[]> {
     const out: DeadLetter[] = [];
     for await (const [key, json] of this.#kv.scan(kp("x"))) {
-      const [, cell, task] = split(key);
-      out.push({ cell: cell as string, key: task as string, ...JSON.parse(json) });
+      const [, builder, task] = split(key);
+      out.push({ builder: builder as string, key: task as string, ...JSON.parse(json) });
     }
     return out;
   }
@@ -199,7 +199,7 @@ export class CursorEngine implements Engine {
     for (;;) {
       let found = false;
       for (const id of this.#topo.order) {
-        const r = await this.#processCell(this.#topo.cell(id), stats, budget);
+        const r = await this.#processCell(this.#topo.builder(id), stats, budget);
         if (r === "stopped") {
           stats.pending = true;
           return stats;
@@ -212,27 +212,27 @@ export class CursorEngine implements Engine {
 
   // ---- scheduling --------------------------------------------------------
 
-  /** Discover and execute one cell's pending tasks. */
+  /** Discover and execute one builder's pending tasks. */
   async #processCell(
-    cell: CellDef,
+    builder: BuilderDef,
     stats: RunStats,
     budget: { left: number },
   ): Promise<"idle" | "found" | "stopped"> {
     const hi = this.#stamp;
-    const cur = await this.#cursorOf(cell.id);
+    const cur = await this.#cursorOf(builder.id);
     if (cur >= hi) return "idle";
 
     const cand = new Map<string, number>(); // task → largest triggering stamp
-    if (cell.kind === "reduce" && !(await this.#isReduceBuilt(cell.id))) cand.set("*", 0);
+    if (builder.kind === "reduce" && !(await this.#isReduceBuilt(builder.id))) cand.set("*", 0);
     let scanned = 0;
-    for (const s of this.#deps.get(cell.id) as string[]) {
-      // Skip signals with no change after the cursor (known without I/O).
+    for (const s of this.#deps.get(builder.id) as string[]) {
+      // Skip collections with no change after the cursor (known without I/O).
       if ((this.#lastChange.get(s) ?? this.#initStamp) <= cur) continue;
-      scanned += await this.#discover(cell, s, cur, cand);
+      scanned += await this.#discover(builder, s, cur, cand);
     }
-    const cursorWrite: Write = { key: k("m", "cur", cell.id), value: String(hi) };
+    const cursorWrite: Write = { key: k("m", "cur", builder.id), value: String(hi) };
     if (cand.size === 0) {
-      this.#cursor.set(cell.id, hi);
+      this.#cursor.set(builder.id, hi);
       if (scanned >= IDLE_CURSOR_PERSIST) await this.#serial(() => this.#kv.commit([cursorWrite]));
       return scanned > 0 ? "found" : "idle";
     }
@@ -243,7 +243,7 @@ export class CursorEngine implements Engine {
       const task = tasks[i] as string;
       const last = i === tasks.length - 1;
       const r = await this.#processTask(
-        cell,
+        builder,
         task,
         cand.get(task) as number,
         stats,
@@ -253,44 +253,44 @@ export class CursorEngine implements Engine {
       if (r === "stopped") return "stopped";
       if (last && r === "committed") persisted = true;
     }
-    this.#cursor.set(cell.id, hi);
+    this.#cursor.set(builder.id, hi);
     if (!persisted && scanned >= IDLE_CURSOR_PERSIST)
       await this.#serial(() => this.#kv.commit([cursorWrite]));
     return "found";
   }
 
-  /** Scan `signal`'s changelog after `cur` and add the tasks it triggers to `cand`. */
+  /** Scan `collection`'s changelog after `cur` and add the tasks it triggers to `cand`. */
   async #discover(
-    cell: CellDef,
-    signal: string,
+    builder: BuilderDef,
+    collection: string,
     cur: number,
     cand: Map<string, number>,
   ): Promise<number> {
     const add = (task: string, stamp: number) => {
       if ((cand.get(task) ?? -1) < stamp) cand.set(task, stamp);
     };
-    const isInput = cell.inputs.includes(signal);
-    const isMap = cell.kind !== "reduce";
-    const rdOn = await this.#marker(k("m", "rd", cell.id, signal));
-    const rlOn = await this.#marker(k("m", "rl", cell.id, signal));
+    const isInput = builder.inputs.includes(collection);
+    const isMap = builder.kind !== "reduce";
+    const rdOn = await this.#marker(k("m", "rd", builder.id, collection));
+    const rlOn = await this.#marker(k("m", "rl", builder.id, collection));
     let max = 0;
     let n = 0;
-    // Entries are `c/<signal>/<seq>/<key>`. Every key with stamp `cur` sorts below this anchor.
-    const after = kp("c", signal) + seqKey(cur) + AFTER_SEP;
-    for await (const [entry] of this.#kv.scan(kp("c", signal), { after })) {
+    // Entries are `c/<collection>/<seq>/<key>`. Every key with stamp `cur` sorts below this anchor.
+    const after = kp("c", collection) + seqKey(cur) + AFTER_SEP;
+    for await (const [entry] of this.#kv.scan(kp("c", collection), { after })) {
       n++;
       const [, , seq, rowKey] = split(entry) as [string, string, string, string];
       const stamp = Number.parseInt(seq, 36);
       if (stamp > max) max = stamp;
       if (isInput) add(isMap ? rowKey : "*", stamp);
       if (rdOn) {
-        for await (const [dep] of this.#kv.scan(kp("rd", cell.id, signal, rowKey))) {
+        for await (const [dep] of this.#kv.scan(kp("rd", builder.id, collection, rowKey))) {
           add(split(dep)[4] as string, stamp);
         }
       }
     }
     if (rlOn && n > 0) {
-      for await (const [dep] of this.#kv.scan(kp("rl", cell.id, signal)))
+      for await (const [dep] of this.#kv.scan(kp("rl", builder.id, collection)))
         add(split(dep)[3] as string, max);
     }
     return n;
@@ -302,14 +302,14 @@ export class CursorEngine implements Engine {
    * retries. `extra` writes (the cursor) ride on its commit.
    */
   async #processTask(
-    cell: CellDef,
+    builder: BuilderDef,
     task: string,
     trigger: number,
     stats: RunStats,
     budget: { left: number },
     extra: Write | undefined,
   ): Promise<Outcome> {
-    const rec = await this.#loadRec(cell.id, task);
+    const rec = await this.#loadRec(builder.id, task);
     if (rec && rec.b >= trigger) return "skipped";
     if (budget.left <= 0) return "stopped";
 
@@ -317,9 +317,9 @@ export class CursorEngine implements Engine {
     // are already committed and visible to this execution's reads.
     let b = this.#stamp;
     const pre = new Map<string, string | undefined>();
-    if (cell.kind !== "reduce") {
+    if (builder.kind !== "reduce") {
       let alive = false;
-      for (const s of cell.inputs) {
+      for (const s of builder.inputs) {
         const json = decodeRow(await this.#kv.get(k("r", s, task)))?.json;
         pre.set(k(s, task), json);
         if (json !== undefined) alive = true;
@@ -329,10 +329,10 @@ export class CursorEngine implements Engine {
         budget.left--;
         await this.#serial(async () => {
           const tx = this.#tx();
-          await this.#retractOutputs(tx, cell.id, task, rec.o, new Set());
-          await this.#depWrites(tx, cell.id, task, rec, { d: new Map(), l: new Set() });
-          tx.writes.push({ key: k("t", cell.id, task) });
-          if (rec.dl) tx.writes.push({ key: k("x", cell.id, task) });
+          await this.#retractOutputs(tx, builder.id, task, rec.o, new Set());
+          await this.#depWrites(tx, builder.id, task, rec, { d: new Map(), l: new Set() });
+          tx.writes.push({ key: k("t", builder.id, task) });
+          if (rec.dl) tx.writes.push({ key: k("x", builder.id, task) });
           await this.#commit(tx, extra);
         });
         stats.executed++;
@@ -347,8 +347,8 @@ export class CursorEngine implements Engine {
       if (attempt > 1) b = this.#stamp;
       reads = { d: new Map(), l: new Set() };
       try {
-        const emitted = await this.#exec(cell, task, reads, attempt === 1 ? pre : undefined);
-        const err = await this.#commitSuccess(cell, task, rec, b, emitted, reads, extra);
+        const emitted = await this.#exec(builder, task, reads, attempt === 1 ? pre : undefined);
+        const err = await this.#commitSuccess(builder, task, rec, b, emitted, reads, extra);
         if (err === undefined) {
           stats.executed++;
           return "committed";
@@ -367,11 +367,11 @@ export class CursorEngine implements Engine {
       for (const [s, rk] of rec?.d ?? [])
         if (!reads.d.has(k(s, rk))) reads.d.set(k(s, rk), [s, rk]);
       for (const s of rec?.l ?? []) reads.l.add(s);
-      await this.#depWrites(tx, cell.id, task, rec, reads);
+      await this.#depWrites(tx, builder.id, task, rec, reads);
       const next: Rec = { b, o: rec?.o ?? [], d: [...reads.d.values()], l: [...reads.l], dl: 1 };
-      tx.writes.push({ key: k("t", cell.id, task), value: JSON.stringify(next) });
+      tx.writes.push({ key: k("t", builder.id, task), value: JSON.stringify(next) });
       tx.writes.push({
-        key: k("x", cell.id, task),
+        key: k("x", builder.id, task),
         value: JSON.stringify({ attempts: this.#maxAttempts, error: errorText(lastError) }),
       });
       await this.#commit(tx, extra);
@@ -380,50 +380,55 @@ export class CursorEngine implements Engine {
     return "committed";
   }
 
-  /** Run the cell function once, tracking reads; returns its emissions. */
+  /** Run the builder function once, tracking reads; returns its emissions. */
   async #exec(
-    cell: CellDef,
+    builder: BuilderDef,
     task: string,
     reads: Reads,
     pre: Map<string, string | undefined> | undefined,
   ): Promise<Map<string, [string, string, string]>> {
-    const readable = new Set(this.#deps.get(cell.id));
-    const isMap = cell.kind !== "reduce";
-    const emitted = new Map<string, [string, string, string]>(); // id → [signal, key, json]
-    const check = (signal: string) => {
-      if (!readable.has(signal)) throw new Error(`Cell "${cell.id}" read undeclared "${signal}"`);
+    const readable = new Set(this.#deps.get(builder.id));
+    const isMap = builder.kind !== "reduce";
+    const emitted = new Map<string, [string, string, string]>(); // id → [collection, key, json]
+    const check = (collection: string) => {
+      if (!readable.has(collection))
+        throw new Error(`Builder "${builder.id}" read undeclared "${collection}"`);
     };
     const ctx: TaskContext = {
       key: task,
-      get: async (signal, key) => {
-        check(signal);
-        const implied = cell.inputs.includes(signal) && (!isMap || key === task);
-        if (!implied) reads.d.set(k(signal, key), [signal, key]);
-        const id = k(signal, key);
+      get: async (collection, key) => {
+        check(collection);
+        const implied = builder.inputs.includes(collection) && (!isMap || key === task);
+        if (!implied) reads.d.set(k(collection, key), [collection, key]);
+        const id = k(collection, key);
         const json = pre?.has(id)
           ? pre.get(id)
-          : decodeRow(await this.#kv.get(k("r", signal, key)))?.json;
+          : decodeRow(await this.#kv.get(k("r", collection, key)))?.json;
         return json === undefined ? undefined : (JSON.parse(json) as Json);
       },
-      list: async (signal) => {
-        check(signal);
-        if (isMap || !cell.inputs.includes(signal)) reads.l.add(signal);
-        return this.list(signal);
+      list: async (collection) => {
+        check(collection);
+        if (isMap || !builder.inputs.includes(collection)) reads.l.add(collection);
+        return this.list(collection);
       },
-      emit: (signal, key, value) => {
-        if (!cell.outputs.includes(signal)) {
-          throw new Error(`Cell "${cell.id}" emitted to undeclared signal "${signal}"`);
+      emit: (collection, key, value) => {
+        if (!builder.outputs.includes(collection)) {
+          throw new Error(
+            `Builder "${builder.id}" emitted to undeclared collection "${collection}"`,
+          );
         }
         const json = canonicalJson(value);
-        const id = k(signal, key);
+        const id = k(collection, key);
         const prior = emitted.get(id);
         if (prior && prior[2] !== json) {
-          throw new ConflictingEmission(`${signal}/${key}: emitted twice with different values`);
+          throw new ConflictingEmission(
+            `${collection}/${key}: emitted twice with different values`,
+          );
         }
-        emitted.set(id, [signal, key, json]);
+        emitted.set(id, [collection, key, json]);
       },
     };
-    await cell.run(ctx);
+    await builder.run(ctx);
     return emitted;
   }
 
@@ -434,7 +439,7 @@ export class CursorEngine implements Engine {
    * owned by another task.
    */
   async #commitSuccess(
-    cell: CellDef,
+    builder: BuilderDef,
     task: string,
     rec: Rec | undefined,
     b: number,
@@ -444,25 +449,25 @@ export class CursorEngine implements Engine {
   ): Promise<unknown> {
     return this.#serial(async () => {
       const tx = this.#tx();
-      const owner = cell.id + OWNER_SEP + task;
+      const owner = builder.id + OWNER_SEP + task;
       try {
-        for (const [signal, key, json] of emitted.values())
-          await this.#writeRow(tx, signal, key, json, owner);
+        for (const [collection, key, json] of emitted.values())
+          await this.#writeRow(tx, collection, key, json, owner);
       } catch (error) {
         return error;
       }
-      await this.#retractOutputs(tx, cell.id, task, rec?.o ?? [], new Set(emitted.keys()));
-      await this.#depWrites(tx, cell.id, task, rec, reads);
+      await this.#retractOutputs(tx, builder.id, task, rec?.o ?? [], new Set(emitted.keys()));
+      await this.#depWrites(tx, builder.id, task, rec, reads);
       const next: Rec = {
         b,
         o: [...emitted.values()].map(([s, rk]) => [s, rk]),
         d: [...reads.d.values()],
         l: [...reads.l],
       };
-      tx.writes.push({ key: k("t", cell.id, task), value: JSON.stringify(next) });
-      if (rec?.dl) tx.writes.push({ key: k("x", cell.id, task) });
+      tx.writes.push({ key: k("t", builder.id, task), value: JSON.stringify(next) });
+      if (rec?.dl) tx.writes.push({ key: k("x", builder.id, task) });
       await this.#commit(tx, extra);
-      if (cell.kind === "reduce") this.#reduceBuilt.add(cell.id);
+      if (builder.kind === "reduce") this.#reduceBuilt.add(builder.id);
       return undefined;
     });
   }
@@ -470,11 +475,11 @@ export class CursorEngine implements Engine {
   // ---- row writes and indexes ---------------------------------------------
 
   /** A source write: one row change in its own commit (none if unchanged). */
-  async #write(signal: string, key: string, json: string | undefined): Promise<void> {
+  async #write(collection: string, key: string, json: string | undefined): Promise<void> {
     await this.#init();
     await this.#serial(async () => {
       const tx = this.#tx();
-      await this.#writeRow(tx, signal, key, json, "");
+      await this.#writeRow(tx, collection, key, json, "");
       if (tx.writes.length > 0) await this.#commit(tx);
     });
   }
@@ -487,38 +492,38 @@ export class CursorEngine implements Engine {
    */
   async #writeRow(
     tx: Tx,
-    signal: string,
+    collection: string,
     key: string,
     json: string | undefined,
     owner: string,
   ): Promise<void> {
-    const rk = k("r", signal, key);
+    const rk = k("r", collection, key);
     const cur = decodeRow(await this.#kv.get(rk));
     if (json === undefined) {
       if (cur?.json === undefined || cur.owner !== owner) return;
     } else if (cur?.json !== undefined) {
       if (cur.owner !== owner) {
         throw new ConflictingEmission(
-          `${signal}/${key}: already emitted by ${cur.owner.replace(OWNER_SEP, "/")}`,
+          `${collection}/${key}: already emitted by ${cur.owner.replace(OWNER_SEP, "/")}`,
         );
       }
       if (cur.json === json) return;
     }
     const stamp = ++tx.stamp;
     tx.writes.push({ key: rk, value: encodeRow(stamp, owner, json) });
-    if (cur) tx.writes.push({ key: k("c", signal, cur.seq, key) });
-    tx.writes.push({ key: k("c", signal, seqKey(stamp), key), value: "" });
-    tx.touched.add(signal);
+    if (cur) tx.writes.push({ key: k("c", collection, cur.seq, key) });
+    tx.writes.push({ key: k("c", collection, seqKey(stamp), key), value: "" });
+    tx.touched.add(collection);
   }
 
   async #retractOutputs(
     tx: Tx,
-    cellId: string,
+    builderId: string,
     task: string,
     old: [string, string][],
     keep: Set<string>,
   ) {
-    const owner = cellId + OWNER_SEP + task;
+    const owner = builderId + OWNER_SEP + task;
     for (const [s, rk] of old)
       if (!keep.has(k(s, rk))) await this.#writeRow(tx, s, rk, undefined, owner);
   }
@@ -526,7 +531,7 @@ export class CursorEngine implements Engine {
   /** Stage the reverse-index diff between a task's old record and its new reads. */
   async #depWrites(
     tx: Tx,
-    cellId: string,
+    builderId: string,
     task: string,
     rec: Rec | undefined,
     reads: Reads,
@@ -535,18 +540,18 @@ export class CursorEngine implements Engine {
     const oldL = new Set(rec?.l ?? []);
     for (const [id, [s, rk]] of reads.d) {
       if (oldD.has(id)) continue;
-      tx.writes.push({ key: k("rd", cellId, s, rk, task), value: "" });
-      await this.#ensureMarker(tx, k("m", "rd", cellId, s));
+      tx.writes.push({ key: k("rd", builderId, s, rk, task), value: "" });
+      await this.#ensureMarker(tx, k("m", "rd", builderId, s));
     }
     for (const [s, rk] of rec?.d ?? []) {
-      if (!reads.d.has(k(s, rk))) tx.writes.push({ key: k("rd", cellId, s, rk, task) });
+      if (!reads.d.has(k(s, rk))) tx.writes.push({ key: k("rd", builderId, s, rk, task) });
     }
     for (const s of reads.l) {
       if (oldL.has(s)) continue;
-      tx.writes.push({ key: k("rl", cellId, s, task), value: "" });
-      await this.#ensureMarker(tx, k("m", "rl", cellId, s));
+      tx.writes.push({ key: k("rl", builderId, s, task), value: "" });
+      await this.#ensureMarker(tx, k("m", "rl", builderId, s));
     }
-    for (const s of oldL) if (!reads.l.has(s)) tx.writes.push({ key: k("rl", cellId, s, task) });
+    for (const s of oldL) if (!reads.l.has(s)) tx.writes.push({ key: k("rl", builderId, s, task) });
   }
 
   /** Markers are set once and never cleared (a stale marker only costs a scan). */
@@ -599,16 +604,16 @@ export class CursorEngine implements Engine {
     }
   }
 
-  async #loadRec(cellId: string, task: string): Promise<Rec | undefined> {
-    const v = await this.#kv.get(k("t", cellId, task));
+  async #loadRec(builderId: string, task: string): Promise<Rec | undefined> {
+    const v = await this.#kv.get(k("t", builderId, task));
     return v === undefined ? undefined : (JSON.parse(v) as Rec);
   }
 
-  async #cursorOf(cellId: string): Promise<number> {
-    let c = this.#cursor.get(cellId);
+  async #cursorOf(builderId: string): Promise<number> {
+    let c = this.#cursor.get(builderId);
     if (c === undefined) {
-      c = Number((await this.#kv.get(k("m", "cur", cellId))) ?? 0);
-      this.#cursor.set(cellId, c);
+      c = Number((await this.#kv.get(k("m", "cur", builderId))) ?? 0);
+      this.#cursor.set(builderId, c);
     }
     return c;
   }
@@ -622,10 +627,10 @@ export class CursorEngine implements Engine {
     return m;
   }
 
-  async #isReduceBuilt(cellId: string): Promise<boolean> {
-    if (this.#reduceBuilt.has(cellId)) return true;
-    if ((await this.#kv.get(k("t", cellId, "*"))) === undefined) return false;
-    this.#reduceBuilt.add(cellId);
+  async #isReduceBuilt(builderId: string): Promise<boolean> {
+    if (this.#reduceBuilt.has(builderId)) return true;
+    if ((await this.#kv.get(k("t", builderId, "*"))) === undefined) return false;
+    this.#reduceBuilt.add(builderId);
     return true;
   }
 }

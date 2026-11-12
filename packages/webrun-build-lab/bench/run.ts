@@ -26,7 +26,7 @@ import {
   upper,
 } from "../src/core/fixtures.js";
 import { type KvMetrics, MemKV } from "../src/core/kv.js";
-import type { CellDef, Engine, EngineFactory, Json } from "../src/core/types.js";
+import type { BuilderDef, Engine, EngineFactory, Json } from "../src/core/types.js";
 import { NaiveEngine } from "../src/prototypes/naive.js";
 import { QueueEngine } from "../src/prototypes/queue.js";
 
@@ -44,7 +44,8 @@ const ENGINES: Record<string, { label: string; load: () => Promise<EngineFactory
     label: "R webrun-builder",
     load: async () => {
       const m = await import("@statewalker/webrun-builder");
-      return (o) => new m.BuildEngine({ store: o.kv, cells: o.cells, maxAttempts: o.maxAttempts });
+      return (o) =>
+        new m.BuildEngine({ store: o.kv, builders: o.builders, maxAttempts: o.maxAttempts });
     },
   },
   c: {
@@ -56,8 +57,8 @@ const ENGINES: Record<string, { label: string; load: () => Promise<EngineFactory
   },
 };
 
-const CELLS: CellDef[] = [split, upper, len, double, stats, compile, bundle];
-const SIGNALS = ["chunks", "upper", "len", "len2", "stats", "compiled", "bundle"];
+const BUILDERS: BuilderDef[] = [split, upper, len, double, stats, compile, bundle];
+const COLLECTIONS = ["chunks", "upper", "len", "len2", "stats", "compiled", "bundle"];
 const WORDS = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu".split(" ");
 
 interface Workload {
@@ -160,7 +161,7 @@ interface Row extends KvMetrics {
 
 async function bench(name: string, factory: EngineFactory, w: Workload): Promise<Row[]> {
   const kv = new MemKV();
-  const engine = factory({ kv, cells: CELLS });
+  const engine = factory({ kv, builders: BUILDERS });
   const rows: Row[] = [];
   for (const sc of scenarios(w)) {
     kv.resetMetrics();
@@ -199,12 +200,12 @@ async function main(): Promise<void> {
     all.push(...rows);
     // Final-state check against P0 over a fresh run of the same scenarios.
     const kv = new MemKV();
-    const e = factory({ kv, cells: CELLS });
+    const e = factory({ kv, builders: BUILDERS });
     for (const sc of scenarios(w)) {
       await sc.ops(e);
       while ((await e.run()).pending) {}
     }
-    const snap = JSON.stringify(await snapshot(e, SIGNALS));
+    const snap = JSON.stringify(await snapshot(e, COLLECTIONS));
     if (reference === undefined) reference = snap;
     else if (snap !== reference)
       console.error(`!! ${spec.label}: final state differs from reference`);

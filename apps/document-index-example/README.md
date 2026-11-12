@@ -25,7 +25,7 @@ const index = await openDocumentIndex({
 });
 
 await index.update();                                    // scan + incremental build + flush
-const hits = await index.search("perovskite tandem cells", { topK: 10 });
+const hits = await index.search("perovskite tandem builders", { topK: 10 });
 // [{ path: "solar.pdf", chunk: 3, text: "…", score: 0.031 }, …]
 ```
 
@@ -44,7 +44,7 @@ in production.
 
 ## How it works
 
-### The pipeline is five map cells
+### The pipeline is five map builders
 
 ```
 scanSources ─► files ─[extract]─► text ─[chunk]─► chunks ─[embed]─► embeddings
@@ -54,7 +54,7 @@ scanSources ─► files ─[extract]─► text ─[chunk]─► chunks ─[emb
                                full-text sub-index          vector sub-index
 ```
 
-| Cell | One task per | Reads | Emits |
+| Builder | One task per | Reads | Emits |
 |---|---|---|---|
 | `extract` | file | the PDF bytes | `text/<doc>` = markdown (non-PDFs emit nothing) |
 | `chunk` | document | `text/<doc>` | `chunks/<doc>#<hash>` = chunk text, `layout/<doc>` = ordered chunk ids |
@@ -67,7 +67,7 @@ durable cache: the indexes can be rebuilt without calling the model again.
 
 ### Indexing
 
-`update()` mirrors the folder into the `files` signal (`scanSources`: one row per file, valued by
+`update()` mirrors the folder into the `files` collection (`scanSources`: one row per file, valued by
 `{ mtime, size }`), runs the engine to convergence, then flushes the search index. On the first run,
 each PDF is extracted once, chunked once, and each chunk is embedded once and added to both
 sub-indexes.
@@ -101,7 +101,7 @@ documents and embeds 10 chunks.
 
 A removed PDF loses its `files` row. Its `extract` task is dead, so `text/<doc>` is retracted. Then
 the `chunk` task is dead, so its chunks and layout are retracted. Then every per-chunk task is dead:
-embeddings are retracted, and both index cells' `dispose` delete the blocks. Nothing is left in the
+embeddings are retracted, and both index builders' `dispose` delete the blocks. Nothing is left in the
 engine store or in either index. A file that becomes ignored is handled the same way.
 
 ### Keeping the indexes consistent with the engine
@@ -114,7 +114,7 @@ When a process opens the index it checks two things:
 - the dirty row is still set: a previous process died between the engine commit and the flush;
 - the index is empty while the engine says chunks were indexed: the index state was lost.
 
-In either case it clears the index and invalidates the two index cells. The next `update()`
+In either case it clears the index and invalidates the two index builders. The next `update()`
 re-indexes from the stored chunks and embeddings, without extracting or embedding again.
 
 ## Tests

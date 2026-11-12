@@ -1,39 +1,39 @@
 import { assertName } from "./keys.js";
-import type { CellDef } from "./types.js";
+import type { BuilderDef } from "./types.js";
 
 /**
- * The static signal-level topology of a cell set. A cell depends on every cell
- * producing a signal it declares in `inputs` or `reads`. Validates the set
- * (unique ids, reserved characters, no self-consumption, map cells have inputs,
+ * The static collection-level topology of a builder set. A builder depends on every builder
+ * producing a collection it declares in `inputs` or `reads`. Validates the set
+ * (unique ids, reserved characters, no self-consumption, map builders have inputs,
  * no cycles) and computes a deterministic topological order — upstream first,
  * declaration order breaking ties — whose positions are the queue ranks.
  *
- * Several cells may output the same signal; row ownership is enforced per row.
+ * Several builders may output the same collection; row ownership is enforced per row.
  */
 export class Topology {
-  readonly cells: Map<string, CellDef>;
-  /** All cell ids, upstream first. */
+  readonly builders: Map<string, BuilderDef>;
+  /** All builder ids, upstream first. */
   readonly order: string[];
-  /** Position of each cell in `order` (the queue rank). */
+  /** Position of each builder in `order` (the queue rank). */
   readonly rank: Map<string, number>;
-  /** Signals produced by some cell. */
+  /** Collections produced by some builder. */
   readonly derived: Set<string>;
   readonly #readers = new Map<string, string[]>();
 
-  constructor(cells: readonly CellDef[]) {
-    this.cells = new Map();
+  constructor(builders: readonly BuilderDef[]) {
+    this.builders = new Map();
     const producers = new Map<string, string[]>();
-    for (const c of cells) {
-      assertName("Cell id", c.id);
-      for (const s of [...c.inputs, ...(c.reads ?? []), ...c.outputs]) assertName("Signal", s);
-      if (this.cells.has(c.id)) throw new Error(`Duplicate cell id: ${c.id}`);
+    for (const c of builders) {
+      assertName("Builder id", c.id);
+      for (const s of [...c.inputs, ...(c.reads ?? []), ...c.outputs]) assertName("Collection", s);
+      if (this.builders.has(c.id)) throw new Error(`Duplicate builder id: ${c.id}`);
       const deps = depsOf(c);
       const own = c.outputs.find((s) => deps.includes(s));
-      if (own !== undefined) throw new Error(`Cell "${c.id}" consumes its own output "${own}"`);
+      if (own !== undefined) throw new Error(`Builder "${c.id}" consumes its own output "${own}"`);
       if (c.kind !== "reduce" && c.inputs.length === 0) {
-        throw new Error(`Map cell "${c.id}" needs at least one input`);
+        throw new Error(`Map builder "${c.id}" needs at least one input`);
       }
-      this.cells.set(c.id, c);
+      this.builders.set(c.id, c);
       for (const s of deps) push(this.#readers, s, c.id);
       for (const s of c.outputs) push(producers, s, c.id);
     }
@@ -42,7 +42,7 @@ export class Topology {
     // Kahn's algorithm; the ready set is kept in declaration order.
     const upstream = new Map<string, Set<string>>();
     const downstream = new Map<string, Set<string>>();
-    for (const c of cells) {
+    for (const c of builders) {
       const ups = new Set<string>();
       for (const s of depsOf(c)) for (const p of producers.get(s) ?? []) ups.add(p);
       upstream.set(c.id, ups);
@@ -55,9 +55,9 @@ export class Topology {
         set.add(c.id);
       }
     }
-    const declared = new Map(cells.map((c, i) => [c.id, i]));
+    const declared = new Map(builders.map((c, i) => [c.id, i]));
     const pending = new Map([...upstream].map(([id, ups]) => [id, ups.size]));
-    const ready = cells.filter((c) => pending.get(c.id) === 0).map((c) => c.id);
+    const ready = builders.filter((c) => pending.get(c.id) === 0).map((c) => c.id);
     const order: string[] = [];
     while (ready.length > 0) {
       const id = ready.shift() as string;
@@ -68,35 +68,35 @@ export class Topology {
         if (left === 0) insertSorted(ready, d, declared);
       }
     }
-    if (order.length < cells.length) {
-      const stuck = new Set(cells.map((c) => c.id).filter((id) => !order.includes(id)));
-      // Only cells on a cycle reach themselves; the rest are merely downstream of one.
+    if (order.length < builders.length) {
+      const stuck = new Set(builders.map((c) => c.id).filter((id) => !order.includes(id)));
+      // Only builders on a cycle reach themselves; the rest are merely downstream of one.
       const onCycle = [...stuck].filter((id) => reachesSelf(id, stuck, upstream));
-      throw new Error(`Cycle detected among cells: ${onCycle.join(", ")}`);
+      throw new Error(`Cycle detected among builders: ${onCycle.join(", ")}`);
     }
     this.order = order;
     this.rank = new Map(order.map((id, i) => [id, i]));
   }
 
-  cell(id: string): CellDef {
-    const c = this.cells.get(id);
-    if (!c) throw new Error(`Unknown cell "${id}"`);
+  builder(id: string): BuilderDef {
+    const c = this.builders.get(id);
+    if (!c) throw new Error(`Unknown builder "${id}"`);
     return c;
   }
 
-  assertSource(signal: string): void {
-    if (this.derived.has(signal)) {
-      throw new Error(`"${signal}" is not a source signal: it is produced by a cell`);
+  assertSource(collection: string): void {
+    if (this.derived.has(collection)) {
+      throw new Error(`"${collection}" is not a source collection: it is produced by a builder`);
     }
   }
 
-  /** Cells that may read `signal` (as input or extra read). */
-  readersOf(signal: string): string[] {
-    return this.#readers.get(signal) ?? [];
+  /** Builders that may read `collection` (as input or extra read). */
+  readersOf(collection: string): string[] {
+    return this.#readers.get(collection) ?? [];
   }
 }
 
-function depsOf(c: CellDef): string[] {
+function depsOf(c: BuilderDef): string[] {
   return [...new Set([...c.inputs, ...(c.reads ?? [])])];
 }
 

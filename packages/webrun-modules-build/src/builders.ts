@@ -1,10 +1,10 @@
-import { type CellDef, SOURCES_SIGNAL } from "@statewalker/webrun-builder";
+import { type BuilderDef, SOURCES_COLLECTION } from "@statewalker/webrun-builder";
 import { urlPath, walkFrom } from "@statewalker/webrun-modules";
 import { emitBuildForms, isAsset } from "./emit-forms.js";
 import type { WebrunBuildHost } from "./host.js";
 
 export const PREPROCESS_CELL = "Preprocess";
-/** Signal of emitted entry pointers: key = emitted path, value = source uri. */
+/** Collection of emitted entry pointers: key = emitted path, value = source uri. */
 export const SERVED_SIGNAL = "served";
 
 /** Sources the transform builds as entries: JS/TS modules, CSS and JSON. */
@@ -17,7 +17,7 @@ function toProjectId(uri: string): string {
 }
 
 /**
- * The batch build's cells over the `webrun-builder` engine. One map cell per
+ * The batch build's builders over the `webrun-builder` engine. One map builder per
  * source file:
  *
  *   sources (scanned) → [Preprocess] → served
@@ -30,11 +30,11 @@ function toProjectId(uri: string): string {
  * - `dispose` runs when a source disappears (or becomes ignored): it prunes the
  *   emitted artifact and its sidecars. The engine retracts the `served` row.
  */
-export function webrunCells(host: WebrunBuildHost): CellDef[] {
+export function webrunBuilders(host: WebrunBuildHost): BuilderDef[] {
   return [
     {
       id: PREPROCESS_CELL,
-      inputs: [SOURCES_SIGNAL],
+      inputs: [SOURCES_COLLECTION],
       outputs: [SERVED_SIGNAL],
       async run(ctx) {
         if (!ENTRY.test(ctx.key)) return;
