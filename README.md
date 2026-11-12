@@ -32,6 +32,7 @@ tools/      private test harness (consumer-install)
 | [`@statewalker/webrun-tailwind`](packages/webrun-tailwind) | Build-only Tailwind CSS v4 transform for the `webrun-modules` transform registry (Node only). | [npm](https://www.npmjs.com/package/@statewalker/webrun-tailwind) |
 | [`@statewalker/webrun-site-builder`](packages/webrun-site-builder) | Builds a `(Request) => Promise<Response>` site handler from static files, endpoints and auth hooks. | [npm](https://www.npmjs.com/package/@statewalker/webrun-site-builder) |
 | [`@statewalker/webrun-site-host`](packages/webrun-site-host) | Hosts a site handler behind a same-origin ServiceWorker in the browser. | [npm](https://www.npmjs.com/package/@statewalker/webrun-site-host) |
+| [`@statewalker/document-index-example`](apps/document-index-example) | Private example: incremental PDF indexing (extract → chunk → embed → full-text + vector indexes) on `webrun-builder` and statewalker-search. | — |
 | [`@statewalker/site-builder-demo`](apps/site-builder-demo) | Private demo: `SiteBuilder` hosted by `HostedSiteBuilder` in the browser. | — |
 | [`@statewalker/site-builder-tsx-spike`](apps/site-builder-tsx-spike) | Private demo: serves `.tsx` sources transpiled on the fly. | — |
 | [`@statewalker/site-builder-jspm-demo`](apps/site-builder-jspm-demo) | Private demo: bare imports resolved in the browser with `@jspm/generator`. | — |

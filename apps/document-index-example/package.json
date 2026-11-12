@@ -1,0 +1,32 @@
+{
+  "name": "@statewalker/document-index-example",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Example: incremental PDF indexing (extract → chunk → embed → full-text + vector indexes) on @statewalker/webrun-builder and statewalker-search.",
+  "license": "MIT",
+  "scripts": {
+    "test": "vitest run",
+    "test:massive": "vitest run --config vitest.massive.config.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check --write .",
+    "format": "biome format --write ."
+  },
+  "dependencies": {
+    "@statewalker/content-extractors": "catalog:",
+    "@statewalker/indexer-api": "catalog:",
+    "@statewalker/indexer-chunker": "catalog:",
+    "@statewalker/indexer-core": "catalog:",
+    "@statewalker/indexer-fulltext": "catalog:",
+    "@statewalker/indexer-mem-minisearch": "catalog:",
+    "@statewalker/indexer-vector": "catalog:",
+    "@statewalker/webrun-builder": "workspace:^",
+    "@statewalker/webrun-files": "catalog:"
+  },
+  "devDependencies": {
+    "@statewalker/webrun-files-mem": "catalog:",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
