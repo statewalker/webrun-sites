@@ -1,0 +1,31 @@
+import type { Json } from "./types.js";
+
+/**
+ * JSON text with object keys sorted at every depth, so equal values have equal
+ * text — "unchanged" means byte-equal canonical text. Throws `TypeError` on
+ * values JSON cannot represent exactly (`undefined`, `NaN`, `Infinity`, class
+ * instances) instead of letting `JSON.stringify` drop or coerce them.
+ */
+export function canonicalJson(value: Json): string {
+  return JSON.stringify(normalize(value));
+}
+
+function normalize(value: unknown): unknown {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new TypeError(`Not a JSON value: ${value}`);
+    return value;
+  }
+  if (Array.isArray(value)) return value.map(normalize);
+  if (typeof value === "object") {
+    const proto = Object.getPrototypeOf(value);
+    if (proto === Object.prototype || proto === null) {
+      const record = value as Record<string, unknown>;
+      // No prototype, so a "__proto__" key is stored as data.
+      const out: Record<string, unknown> = Object.create(null);
+      for (const key of Object.keys(record).sort()) out[key] = normalize(record[key]);
+      return out;
+    }
+  }
+  throw new TypeError(`Not a JSON value: ${Object.prototype.toString.call(value)}`);
+}

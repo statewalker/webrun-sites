@@ -26,24 +26,25 @@ tools/      private test harness (consumer-install)
 
 | Package | Description | npm |
 | --- | --- | --- |
-| [`@statewalker/webrun-dataflow`](packages/webrun-dataflow) | Signal-driven dataflow graph: impact propagation, topological order, transaction and updates stores. No runtime dependencies. | [npm](https://www.npmjs.com/package/@statewalker/webrun-dataflow) |
-| [`@statewalker/webrun-builder`](packages/webrun-builder) | `BuildEngine<THost>`: incremental, resumable build engine on top of `webrun-dataflow`, with a built-in source scanner and file-backed state. | [npm](https://www.npmjs.com/package/@statewalker/webrun-builder) |
+| [`@statewalker/webrun-builder`](packages/webrun-builder) | `BuildEngine`: key-level incremental, resumable build engine — cells over signals with dynamic dependencies, early cut-off, retraction and dead letters; state in a pluggable KV (memory, `FilesApi`, SQLite); `scanSources` for file trees. | [npm](https://www.npmjs.com/package/@statewalker/webrun-builder) |
 | [`@statewalker/webrun-modules`](packages/webrun-modules) | Isomorphic module server: resolves, downloads and transforms npm packages and authored TS/JS into ESM, served from a `FilesApi` cache. | [npm](https://www.npmjs.com/package/@statewalker/webrun-modules) |
 | [`@statewalker/webrun-modules-build`](packages/webrun-modules-build) | Batch module build: runs the `webrun-modules` transforms through `BuildEngine` and writes a static `.js`/`.css` tree. | [npm](https://www.npmjs.com/package/@statewalker/webrun-modules-build) |
 | [`@statewalker/webrun-tailwind`](packages/webrun-tailwind) | Build-only Tailwind CSS v4 transform for the `webrun-modules` transform registry (Node only). | [npm](https://www.npmjs.com/package/@statewalker/webrun-tailwind) |
 | [`@statewalker/webrun-site-builder`](packages/webrun-site-builder) | Builds a `(Request) => Promise<Response>` site handler from static files, endpoints and auth hooks. | [npm](https://www.npmjs.com/package/@statewalker/webrun-site-builder) |
 | [`@statewalker/webrun-site-host`](packages/webrun-site-host) | Hosts a site handler behind a same-origin ServiceWorker in the browser. | [npm](https://www.npmjs.com/package/@statewalker/webrun-site-host) |
+| [`@statewalker/document-index-example`](apps/document-index-example) | Private example: incremental PDF indexing (extract → chunk → embed → full-text + vector indexes) on `webrun-builder` and statewalker-search. | — |
 | [`@statewalker/site-builder-demo`](apps/site-builder-demo) | Private demo: `SiteBuilder` hosted by `HostedSiteBuilder` in the browser. | — |
 | [`@statewalker/site-builder-tsx-spike`](apps/site-builder-tsx-spike) | Private demo: serves `.tsx` sources transpiled on the fly. | — |
 | [`@statewalker/site-builder-jspm-demo`](apps/site-builder-jspm-demo) | Private demo: bare imports resolved in the browser with `@jspm/generator`. | — |
 | [`@statewalker/p2p-demo`](apps/p2p-demo) | Private demo: HTTP between two browsers over libp2p (relay + WebRTC). | — |
 | [`@statewalker/livekit-demo`](apps/livekit-demo) | Private demo: the same as `p2p-demo`, with LiveKit as the transport. | — |
+| [`@statewalker/webrun-build-lab`](packages/webrun-build-lab) | Private: the engine design lab — alternative prototypes, the shared conformance suite and benchmarks behind `webrun-builder`. | — |
 | [`@statewalker/consumer-install-tests`](tools/consumer-install) | Private test harness: packs the packages and installs them into a clean consumer project. | — |
 
 How the packages depend on each other:
 
 ```
-webrun-dataflow ─► webrun-builder ─┐
+webrun-builder ────────────────────┐
 webrun-modules ──► webrun-tailwind ┼─► webrun-modules-build
 webrun-modules ────────────────────┘
 
@@ -52,7 +53,7 @@ webrun-site-builder ─► webrun-site-host ─► apps/*
 
 External `@statewalker` dependencies, by package name:
 
-- `@statewalker/webrun-files` (every package except `webrun-dataflow`; a peer dependency of
+- `@statewalker/webrun-files` (every package; a peer dependency of
   `webrun-site-builder` and `webrun-site-host`), `@statewalker/webrun-files-mem`,
   `@statewalker/webrun-files-node` (dev only);
 - `@statewalker/webrun-http-browser` (`webrun-site-host` and the demos);

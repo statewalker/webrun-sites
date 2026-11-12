@@ -3,7 +3,7 @@
   "version": "0.2.1",
   "private": false,
   "type": "module",
-  "description": "Project-free signal-driven build engine (BuildEngine<THost>): schedules dataflow builders over @statewalker/webrun-dataflow, drives file-backed update/transaction stores, and detects source changes over a FilesApi. Host-agnostic, with a local structural Logger and zero statewalker logging dependency.",
+  "description": "Incremental, idempotent, resumable build engine: cells over signals with dynamic dependencies, early cut-off, automatic retraction and dead letters; all state in a pluggable ordered KV (memory, FilesApi, SQLite).",
   "bugs": {
     "url": "https://github.com/statewalker/webrun-sites/issues"
   },
@@ -41,11 +41,12 @@
     "format": "biome format --write ."
   },
   "dependencies": {
-    "@statewalker/webrun-dataflow": "workspace:^",
     "@statewalker/webrun-files": "catalog:"
   },
   "devDependencies": {
     "@statewalker/webrun-files-mem": "catalog:",
+    "@statewalker/webrun-files-sqlite": "catalog:",
+    "@types/node": "catalog:",
     "rimraf": "catalog:",
     "tsdown": "catalog:",
     "typescript": "catalog:",

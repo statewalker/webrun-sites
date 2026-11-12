@@ -1,0 +1,28 @@
+{
+  "name": "@statewalker/webrun-build-lab",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Exploration lab: alternative incremental build engine prototypes, a shared conformance suite and a benchmark harness.",
+  "license": "MIT",
+  "scripts": {
+    "test": "vitest run && MASSIVE_SCALE=0.3 vitest run --config vitest.massive.config.ts",
+    "test:watch": "vitest",
+    "bench": "tsx bench/run.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check --write .",
+    "format": "biome format --write .",
+    "test:massive": "vitest run --config vitest.massive.config.ts"
+  },
+  "dependencies": {
+    "@statewalker/webrun-builder": "workspace:^"
+  },
+  "devDependencies": {
+    "@statewalker/webrun-files-mem": "catalog:",
+    "@statewalker/webrun-files-sqlite": "catalog:",
+    "@types/node": "catalog:",
+    "tsx": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

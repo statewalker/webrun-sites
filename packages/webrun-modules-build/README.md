@@ -5,8 +5,8 @@
 A batch module builder. It reads a project tree from one `FilesApi`, runs every
 source through the `@statewalker/webrun-modules` preprocess core, and writes a
 static tree of `.js` (and `.css`) files to a second `FilesApi`. The build runs on
-`@statewalker/webrun-builder`'s `BuildEngine`, so a second build after an edit
-re-transforms only what changed.
+the `@statewalker/webrun-builder` incremental engine, so a second build after an
+edit re-transforms only what changed, and a deleted source's artifacts are pruned.
 
 ## Why it exists
 
@@ -28,8 +28,7 @@ multi-megabyte output, which suits a build and not a request.
 pnpm add @statewalker/webrun-modules-build
 ```
 
-Runtime dependencies: `@statewalker/webrun-builder`, `@statewalker/webrun-dataflow`,
-`@statewalker/webrun-files`, `@statewalker/webrun-modules`,
+Runtime dependencies: `@statewalker/webrun-builder`, `@statewalker/webrun-files`, `@statewalker/webrun-modules`,
 `@statewalker/webrun-tailwind`. No peer dependencies.
 
 ### One entry point, for Node
@@ -39,9 +38,9 @@ TypeScript sources in `src/`). It depends on `@statewalker/webrun-tailwind`, whi
 imports `node:fs` and `node:module`, so use it under Node.
 
 Exports: `newProjectBuild` (with the types `ProjectBuild` and
-`ProjectBuildOptions`), `webrunBuilders` (the cell set, for driving your own
-`BuildEngine`), `makeExtMapPolicy` (the URL policy) and the `WebrunBuildHost`
-type.
+`ProjectBuildOptions`), `webrunCells` (the cell set, for driving your own
+`BuildEngine`), `PREPROCESS_CELL` and `SERVED_SIGNAL`, `makeExtMapPolicy` (the URL
+policy) and the `WebrunBuildHost` type.
 
 ### Build a project into a cache
 
@@ -56,7 +55,7 @@ await writeText(project, "/main.ts", `import { u } from "./util.ts";\nexport con
 await writeText(project, "/util.ts", `export const u = "x";`);
 
 const { served } = await newProjectBuild({ project, cache }).build();
-// served → ["/~/main.js", "/~/util.js"]
+// served → ["/~/main.js", "/~/util.js"]  (every current entry, sorted)
 // cache "/~/main.js" → `import { u } from "./util.js";\nexport const out = u;`
 ```
 
@@ -94,24 +93,24 @@ and returns the `UrlPolicy` the build uses: JS-family files and `.json` map to
 
 ## Internals
 
-### The pipeline is four cells on top of the scanner
+### The pipeline is one map cell over the scanned sources
 
 ```
-scanner → sources → [Classify] → module/css/json → [Preprocess] → served → [Serve]
-          sources-removed → [Prune]
+scanSources → sources → [Preprocess] → served
 ```
 
-- **Classify** routes each scanned source to a `module` / `css` / `json` signal
-  by extension. Other files are dropped.
-- **Preprocess** walks the entry's transitive closure via `walkFrom`, emitting the
-  entry and project dependencies as `.js`, plus the `~deps` proxy bodies and
-  resolved npm endpoints as side effects into `cache`, then wraps JSON/CSS ids into
-  their static `.js` forms.
-- **Prune** removes a deleted source's emitted artifact and its sidecars.
-- **Serve** collects the emitted entry paths returned by `build()`.
-
-No cell outputs its own input signal: that would create a cycle for the
-frontier scheduler.
+- `build()` first mirrors the project tree into the `sources` signal
+  (`scanSources`: one row per file, valued by `{ mtime, size }`); only files whose
+  fingerprint changed, appeared or disappeared queue work.
+- **Preprocess** runs once per changed JS/TS/CSS/JSON source: it walks the entry's
+  transitive closure via `walkFrom`, emitting the entry and project dependencies as
+  `.js`, plus the `~deps` proxy bodies and resolved npm endpoints as side effects
+  into `cache`, then wraps JSON/CSS ids into their static `.js` forms, and emits the
+  entry's `served` row. Other files emit nothing.
+- When a source disappears (or becomes ignored), the engine calls the cell's
+  `dispose`, which removes the emitted artifact and its sidecars, and retracts the
+  `served` row.
+- `build()` returns the keys of `served`.
 
 ### A content hash decides what is re-transformed
 
@@ -136,24 +135,25 @@ upgrading Tailwind regenerates the stylesheet even when the entry is unchanged.
 ### What will surprise you
 
 - **The build writes into `project`.** Engine state lives in
-  `/.project/state/` of the project tree (`updates.json`, `transactions.json`,
-  `scanner.json`). A read-only project `FilesApi` fails on the first build.
+  `/.project/state/` of the project tree (a `FilesKV`: `snapshot.json` plus a
+  `log/` of small commit segments). A read-only project `FilesApi` fails on the
+  first build.
 - **`project` and `cache` must be different objects.** Passing the same instance
   throws ``newProjectBuild: `project` and `cache` must be distinct FilesApi instances``:
   the scanner would read the emitted tree back as sources.
-- **`served` accumulates across calls.** Calling `build()` twice on the same
-  `ProjectBuild` returns the paths of both runs, so a re-emitted entry appears
-  twice (`["/~/main.js", "/~/util.js", "/~/util.js"]`). Create a new
-  `ProjectBuild` per run if you need only that run's output.
+- **`served` lists every current entry**, not only those re-emitted by this
+  call.
 - **Files in dot-folders are not built.** The scanner skips every path with a
   segment starting with `.`.
-- **The build is silent.** The engine runs with `NULL_LOGGER`; errors surface only
-  as the rejection of `build()`.
+- **The build is silent.** A source whose transform keeps failing is retried,
+  then parked in the engine's dead letter while the rest of the project builds;
+  `build()` then rejects with `newProjectBuild: N source(s) failed to build; …`.
+  Every `build()` retries the sources that failed last time (their dependencies
+  are not tracked by the engine, so fixing one would not re-queue them).
 
 ### Dependencies
 
-`@statewalker/webrun-builder` and `@statewalker/webrun-dataflow` run the
-pipeline; `@statewalker/webrun-modules` does the resolving and transforming;
+`@statewalker/webrun-builder` runs the pipeline; `@statewalker/webrun-modules` does the resolving and transforming;
 `@statewalker/webrun-tailwind` adds the Tailwind transform;
 `@statewalker/webrun-files` provides `FilesApi` helpers.
 
