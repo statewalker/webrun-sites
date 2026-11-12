@@ -254,6 +254,8 @@ value.
   emitting and Y runs first, Y fails with `ConflictingEmission`; it is retried and succeeds once X
   has released the row (or after `requeue`).
 - **A reduce cell re-lists its whole input** on every change of it.
+- **A net no-op still runs dependents once.** Removing a row and putting back its old value
+  before `run()` queues the dependents at each write; they re-run and cut off immediately.
 
 ## License
 

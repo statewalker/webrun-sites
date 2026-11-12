@@ -19,13 +19,40 @@ are built red/green against one conformance suite, then compared on the same wor
 | `src/prototypes/traces.ts` | **C** pull / verifying traces (Salsa, Shake, "Build Systems à la Carte"). |
 | `tests/conformance.ts` | 24 tests run against every prototype, incl. a crash at *every* commit followed by resume (state must equal the oracle, rework ≤ a clean run) and a randomized model check against P0. |
 | `tests/builder.test.ts` | The suite against the real engine (`webrun-builder`): batch 1, batch 64, concurrency 4, SQLite. |
+| `tests/massive.massive.ts`, `src/core/random-graph.ts` | Massive tests (`pnpm test:massive`, scale with `MASSIVE_SCALE`): random graphs of mixed cells, crash storms, real stores at volume, extreme shapes. |
 | `bench/run.ts`, `bench/static.ts` | Benchmarks; results in `bench/results/`. |
 
 ```sh
+pnpm test:massive              # massive tier; MASSIVE_SCALE=3 pnpm test:massive for more
 pnpm test                      # 193 tests: suite × {A, B, C, B-on-SQLite, R ×4 configs} + P0
 pnpm bench -- 5000             # all engines, N docs + N modules
 pnpm tsx bench/static.ts 2000  # B vs the existing webrun-cells, both on SQLite
 ```
+
+### Massive tests
+
+`pnpm test:massive` (not part of `pnpm test`; ~1 min at scale 1) runs every engine at volume:
+
+- **Random graphs** (`random-graph.ts`): 30–60 cells (×`MASSIVE_SCALE`) of mixed kinds —
+  transform, cut-off (tiny codomain), filter, fan-out (0–3 rows → constant retractions),
+  two-input join, dynamic reads (1–3 rows chosen by value, incl. missing rows), reduce and
+  group-by reduce — over 300–600 keys × 3–5 sources, then rounds of 1…400 random edits. After
+  every round A, B, C and R must **execute exactly the same number of tasks** (all are minimal),
+  and periodically equal the oracle.
+- **Crash storms**: each engine is killed at a random commit again and again during a cold build
+  and two edit phases until one process finishes; the state must equal the oracle and a finished
+  store must have nothing left to do.
+- **Real stores at volume**: R over SQLite and over `FilesKV` must equal R over `MemKV` on a
+  40-cell × 1 500-key graph, and a reopened `FilesKV` must resume with zero work.
+- **Extreme shapes** (R): a 150-stage chain (one edit runs exactly one task per stage), a
+  300-branch fan-out with a reduce over all branches (runs once, glitch-free), one key fanning
+  out to 20 000 rows then shrinking to 10 (the retraction cascades through a downstream cell),
+  20 sources × 1 000 keys with a 1 % edit.
+
+One finding: within one batch of writes, "remove a row, then put back its old value" is a net
+no-op. The eager queue (B, R) still re-runs the dependents — they cut off at once, so results are
+correct — while A and C can skip them. The random-graph rounds therefore apply one edit per row;
+the crash-storm phases keep the net no-ops and check correctness.
 
 The suite is discriminating: each of 8 deliberate bugs injected into B (no reverse deps, no value
 updates, no retraction, no cut-off, no queue-token check, no rank order, no dead-task retraction,
