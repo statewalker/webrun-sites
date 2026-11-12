@@ -37,6 +37,7 @@ export {
   type Row,
   type RowRef,
   type RunOptions,
+  type RunProgress,
   type RunStats,
   type TaskContext,
 } from "./types.js";

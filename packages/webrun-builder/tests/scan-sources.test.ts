@@ -32,15 +32,15 @@ describe("scanSources", () => {
     const engine = new BuildEngine({ store: new MemKV(), builders: [echo] });
     const scan = () => scanSources(engine, { files, root: "proj" });
 
-    expect(await scan()).toEqual({ seen: 2, changed: 2, removed: 0 });
+    expect(await scan()).toEqual({ seen: 2, changed: 2, removed: 0, more: false });
     await engine.run();
     expect(await engine.keys("out")).toEqual(["a.txt", "sub/b.txt"]);
 
-    expect(await scan()).toEqual({ seen: 2, changed: 0, removed: 0 });
+    expect(await scan()).toEqual({ seen: 2, changed: 0, removed: 0, more: false });
     await tick();
     await writeText(files, "proj/a.txt", "a2");
     await files.remove("proj/sub/b.txt");
-    expect(await scan()).toEqual({ seen: 1, changed: 1, removed: 1 });
+    expect(await scan()).toEqual({ seen: 1, changed: 1, removed: 1, more: false });
     log.length = 0;
     await engine.run();
     expect(log).toEqual(["a.txt"]);
@@ -49,7 +49,7 @@ describe("scanSources", () => {
     // A newly ignored file is pruned like a deleted one.
     expect(
       await scanSources(engine, { files, root: "proj", ignore: (u) => u === "a.txt" }),
-    ).toEqual({ seen: 0, changed: 0, removed: 1 });
+    ).toEqual({ seen: 0, changed: 0, removed: 1, more: false });
   });
 
   it("a content fingerprint ignores touches", async () => {

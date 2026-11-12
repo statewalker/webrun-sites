@@ -121,7 +121,7 @@ new BuildEngine({ store, builders, maxAttempts?, batchSize?, concurrency?, share
 |---|---|
 | `put(collection, key, value)` / `remove(collection, key)` | write a source collection (one no builder outputs); resolve `true` if it changed |
 | `get` / `list` / `keys` | read any collection |
-| `run({ maxTasks?, signal? })` | execute queued tasks, most upstream first, until the queue is empty (or interrupted: `pending: true`) |
+| `run({ maxTasks?, signal?, onProgress? })` | execute queued tasks, most upstream first, until the queue is empty (or interrupted: `pending: true`) |
 | `status()` | queued tasks per builder, dead-letter count |
 | `deadLetters()` / `requeue(builder, key)` | inspect parked tasks and put one back |
 | `invalidate(builder)` | queue every task of a builder (its code changed); downstream re-runs only where outputs change |
@@ -162,8 +162,21 @@ atomic `commit(writes)`, where a write may carry a condition (`ifValue`, an SQL 
 ```ts
 import { scanSources } from "@statewalker/webrun-builder";
 
-await scanSources(engine, { files, root: "/" });   // → { seen, changed, removed }
+await scanSources(engine, { files, root: "/" });   // → { seen, changed, removed, more }
+await engine.run({ onProgress: (p) => console.log(p.builder, p.executed) }); // per committed batch
+```
+
+A large corpus in batches, each flowing through the whole pipeline before the next (`limit` is a
+positive integer; the cursor rotates the start, so a file that changes on every scan cannot hold
+the others back):
+
+```ts
+let scan = await scanSources(engine, { files, root: "/", limit: 100 });
 await engine.run();
+while (scan.more) {
+  scan = await scanSources(engine, { files, root: "/", limit: 100, after: scan.cursor });
+  await engine.run();
+}
 ```
 
 One row per file, keyed by its root-relative path, valued by `{ mtime, size }` (or your

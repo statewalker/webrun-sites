@@ -37,7 +37,7 @@ describe("document index — indexing", () => {
     const { opts, calls } = counted({ files });
     const index = await openDocumentIndex(opts);
     const report = await index.update();
-    expect(report.scanned).toEqual({ seen: 6, changed: 6, removed: 0 }); // notes.txt is scanned...
+    expect(report.scanned).toEqual({ seen: 6, changed: 6, removed: 0, more: false }); // notes.txt is scanned...
     expect(calls.extract.sort()).toEqual([
       "doc0000.pdf",
       "doc0001.pdf",
