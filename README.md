@@ -133,10 +133,24 @@ ones use the catalog, lint, format, build, typecheck and tests, then checks that
 every `exports` target exists, every bare import in `dist/` is a declared
 dependency, and packed manifests contain no `workspace:` or `catalog:` specifiers.
 
-Packages are published to npm from CI with changesets: changed packages get a
-version pull request, and merging it publishes them with npm provenance. Add a
+**Every merge to `main` publishes.** After a green CI on `main`, the `release` job:
+1. writes a changeset for every public package whose packed files or published
+   manifest differ from npm's `latest` (a patch; a minor/major when a dependency
+   moved to another breaking line);
+2. applies all pending changesets (`changeset version`: versions and
+   `CHANGELOG.md`) and commits them to `main` as "chore: version packages";
+3. packs every public package whose version npm lacks.
+
+The `publish` job then uploads them with npm trusted publishing (OIDC, no token
+in GitHub) and provenance, and tags a GitHub release per package. Add a
 changeset yourself (`pnpm changeset`) to choose the bump level or the changelog
 text. Dependency updates come from Renovate.
+
+Set-up the pipeline needs once: npm's trusted publisher for each package names
+this repository, `ci.yml` and the `npm` environment; the `npm` environment has no
+required reviewers (add some to gate releases behind an approval); the workflow
+token may push to `main` (branch protection must allow `github-actions[bot]`).
+A brand-new package's first version is published by hand.
 
 ### Configuration files
 
