@@ -38,8 +38,8 @@ TypeScript sources in `src/`). It depends on `@statewalker/webrun-tailwind`, whi
 imports `node:fs` and `node:module`, so use it under Node.
 
 Exports: `newProjectBuild` (with the types `ProjectBuild` and
-`ProjectBuildOptions`), `webrunCells` (the cell set, for driving your own
-`BuildEngine`), `PREPROCESS_CELL` and `SERVED_SIGNAL`, `makeExtMapPolicy` (the URL
+`ProjectBuildOptions`), `webrunBuilders` (the builder set, for driving your own
+`BuildEngine`), `PREPROCESS_BUILDER` and `SERVED_COLLECTION`, `makeExtMapPolicy` (the URL
 policy) and the `WebrunBuildHost` type.
 
 ### Build a project into a cache
@@ -93,13 +93,13 @@ and returns the `UrlPolicy` the build uses: JS-family files and `.json` map to
 
 ## Internals
 
-### The pipeline is one map cell over the scanned sources
+### The pipeline is one map builder over the scanned sources
 
 ```
 scanSources → sources → [Preprocess] → served
 ```
 
-- `build()` first mirrors the project tree into the `sources` signal
+- `build()` first mirrors the project tree into the `sources` collection
   (`scanSources`: one row per file, valued by `{ mtime, size }`); only files whose
   fingerprint changed, appeared or disappeared queue work.
 - **Preprocess** runs once per changed JS/TS/CSS/JSON source: it walks the entry's
@@ -107,7 +107,7 @@ scanSources → sources → [Preprocess] → served
   `.js`, plus the `~deps` proxy bodies and resolved npm endpoints as side effects
   into `cache`, then wraps JSON/CSS ids into their static `.js` forms, and emits the
   entry's `served` row. Other files emit nothing.
-- When a source disappears (or becomes ignored), the engine calls the cell's
+- When a source disappears (or becomes ignored), the engine calls the builder's
   `dispose`, which removes the emitted artifact and its sidecars, and retracts the
   `served` row.
 - `build()` returns the keys of `served`.

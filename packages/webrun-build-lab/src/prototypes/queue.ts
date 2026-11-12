@@ -2,21 +2,21 @@
  * Prototype B — eager dirty queue with a reverse-dependency index.
  *
  * Lineage: `webrun-cells` (a queue of (cell, key) work items committed
- * atomically with the cell's outputs and provenance), generalised from static
+ * atomically with the builder's outputs and provenance), generalised from static
  * "input key → task" triggering to tracked dynamic reads.
  *
  * Writes fan out at write time. When a row's canonical value changes (source
  * `put`/`remove`, a task emitting a different value, a retraction), every task
  * that depends on it is queued in the same commit:
- *   - map tasks of cells keyed by the signal (the key itself),
- *   - the reduce task of cells aggregating the signal,
+ *   - map tasks of builders keyed by the collection (the key itself),
+ *   - the reduce task of builders aggregating the collection,
  *   - tasks that read that exact row (`x/` reverse index of `ctx.get` reads),
- *   - tasks that listed the whole signal (`xl/` index of `ctx.list` reads).
- * `run()` repeatedly takes the queued tasks of the most upstream cell (the
+ *   - tasks that listed the whole collection (`xl/` index of `ctx.list` reads).
+ * `run()` repeatedly takes the queued tasks of the most upstream builder (the
  * queue is keyed by topological rank, so the first row of a scan is always the
- * most upstream work) and executes them. A cell never reads its own outputs, so
- * tasks of one cell are independent and run as a batch; a task never runs while
- * a more upstream cell has queued work, which makes the schedule glitch-free.
+ * most upstream work) and executes them. A builder never reads its own outputs, so
+ * tasks of one builder are independent and run as a batch; a task never runs while
+ * a more upstream builder has queued work, which makes the schedule glitch-free.
  *
  * Each task commits atomically: its changed outputs (+ the consumers they
  * queue), retractions of outputs it no longer emits, its trace (reads and
@@ -29,12 +29,12 @@
  * to the size of the corpus: a no-op run is one empty queue scan.
  *
  * KV layout (tuples encoded with util.k):
- *   r/<signal>/<key>              → <owner>\x02<canonical json>  (owner "" for sources)
- *   q/<rank>/<cell>/<task>        → {"g": token, "a": attempts}
- *   f/<cell>/<task>               → {"r": [[signal,key]…], "l": [signal…], "o": [[signal,key]…]}
- *   x/<signal>/<key>/<cell>/<task>  → ""   (task read that row)
- *   xl/<signal>/<cell>/<task>     → ""     (task listed that signal)
- *   d/<cell>/<task>               → {"attempts": n, "error": text}
+ *   r/<collection>/<key>              → <owner>\x02<canonical json>  (owner "" for sources)
+ *   q/<rank>/<builder>/<task>        → {"g": token, "a": attempts}
+ *   f/<builder>/<task>               → {"r": [[collection,key]…], "l": [collection…], "o": [[collection,key]…]}
+ *   x/<collection>/<key>/<builder>/<task>  → ""   (task read that row)
+ *   xl/<collection>/<builder>/<task>     → ""     (task listed that collection)
+ *   d/<builder>/<task>               → {"attempts": n, "error": text}
  *
  * The queue token makes a change that lands while a task runs survive the
  * task's commit: the commit deletes the queue row only if it still carries the
@@ -44,7 +44,7 @@
  */
 import type { KV } from "../core/kv.js";
 import {
-  type CellDef,
+  type BuilderDef,
   ConflictingEmission,
   type DeadLetter,
   type Engine,
@@ -57,7 +57,7 @@ import {
 import { canonicalJson, errorText, k, kp, seqKey, split, Topology } from "../core/util.js";
 
 type Write = { key: string; value?: string };
-type Ref = [signal: string, key: string];
+type Ref = [collection: string, key: string];
 interface Trace {
   r: Ref[];
   l: string[];
@@ -68,7 +68,7 @@ interface QueueRow {
   a: number;
 }
 interface Claim {
-  cell: string;
+  builder: string;
   task: string;
   qkey: string;
   row: QueueRow;
@@ -87,44 +87,44 @@ export class QueueEngine implements Engine {
 
   constructor(opts: EngineOptions) {
     this.#kv = opts.kv;
-    this.#topo = new Topology(opts.cells);
+    this.#topo = new Topology(opts.builders);
     this.#maxAttempts = opts.maxAttempts ?? 3;
   }
 
   // ---- public API ---------------------------------------------------------
 
-  async put(signal: string, key: string, value: Json): Promise<void> {
-    this.#topo.assertSource(signal);
+  async put(collection: string, key: string, value: Json): Promise<void> {
+    this.#topo.assertSource(collection);
     const json = canonicalJson(value);
     await this.#locked(async () => {
-      const stored = await this.#row(signal, key);
+      const stored = await this.#row(collection, key);
       if (stored?.json === json) return;
       const writes = new Map<string, Write>();
-      set(writes, k("r", signal, key), `${OWNER_SEP}${json}`);
-      await this.#enqueueDependents(signal, key, writes);
+      set(writes, k("r", collection, key), `${OWNER_SEP}${json}`);
+      await this.#enqueueDependents(collection, key, writes);
       await this.#kv.commit([...writes.values()]);
     });
   }
 
-  async remove(signal: string, key: string): Promise<void> {
-    this.#topo.assertSource(signal);
+  async remove(collection: string, key: string): Promise<void> {
+    this.#topo.assertSource(collection);
     await this.#locked(async () => {
-      if ((await this.#row(signal, key)) === undefined) return;
+      if ((await this.#row(collection, key)) === undefined) return;
       const writes = new Map<string, Write>();
-      set(writes, k("r", signal, key), undefined);
-      await this.#enqueueDependents(signal, key, writes);
+      set(writes, k("r", collection, key), undefined);
+      await this.#enqueueDependents(collection, key, writes);
       await this.#kv.commit([...writes.values()]);
     });
   }
 
-  async get(signal: string, key: string): Promise<Json | undefined> {
-    const row = await this.#row(signal, key);
+  async get(collection: string, key: string): Promise<Json | undefined> {
+    const row = await this.#row(collection, key);
     return row === undefined ? undefined : (JSON.parse(row.json) as Json);
   }
 
-  async list(signal: string): Promise<{ key: string; value: Json }[]> {
+  async list(collection: string): Promise<{ key: string; value: Json }[]> {
     const out: { key: string; value: Json }[] = [];
-    for await (const [key, raw] of this.#kv.scan(kp("r", signal))) {
+    for await (const [key, raw] of this.#kv.scan(kp("r", collection))) {
       out.push({ key: split(key)[2] as string, value: JSON.parse(rowJson(raw)) as Json });
     }
     return out;
@@ -133,8 +133,8 @@ export class QueueEngine implements Engine {
   async deadLetters(): Promise<DeadLetter[]> {
     const out: DeadLetter[] = [];
     for await (const [key, raw] of this.#kv.scan(kp("d"))) {
-      const [, cell, task] = split(key);
-      out.push({ cell: cell as string, key: task as string, ...JSON.parse(raw) });
+      const [, builder, task] = split(key);
+      out.push({ builder: builder as string, key: task as string, ...JSON.parse(raw) });
     }
     return out;
   }
@@ -160,23 +160,23 @@ export class QueueEngine implements Engine {
 
   // ---- scheduling ---------------------------------------------------------
 
-  /** The queued tasks of the most upstream cell that has any. */
+  /** The queued tasks of the most upstream builder that has any. */
   async #nextBatch(limit = 64): Promise<Claim[]> {
     const out: Claim[] = [];
-    let cell: string | undefined;
+    let builder: string | undefined;
     for await (const [qkey, raw] of this.#kv.scan(kp("q"), { limit })) {
       const [, , c, task] = split(qkey) as [string, string, string, string];
-      if (cell === undefined) cell = c;
-      else if (c !== cell) break;
-      out.push({ cell: c, task, qkey, row: JSON.parse(raw) as QueueRow });
+      if (builder === undefined) builder = c;
+      else if (c !== builder) break;
+      out.push({ builder: c, task, qkey, row: JSON.parse(raw) as QueueRow });
     }
     return out;
   }
 
-  /** A reduce cell runs at least once, even over empty inputs. */
+  /** A reduce builder runs at least once, even over empty inputs. */
   async #seedReducers(): Promise<void> {
     for (const id of this.#topo.order) {
-      if (this.#topo.cell(id).kind !== "reduce") continue;
+      if (this.#topo.builder(id).kind !== "reduce") continue;
       if ((await this.#kv.get(k("f", id, "*"))) !== undefined) continue;
       if ((await this.#kv.get(this.#qkey(id, "*"))) !== undefined) continue;
       if ((await this.#kv.get(k("d", id, "*"))) !== undefined) continue;
@@ -186,39 +186,43 @@ export class QueueEngine implements Engine {
     }
   }
 
-  #qkey(cell: string, task: string): string {
-    return k("q", seqKey(this.#topo.rank.get(cell) as number), cell, task);
+  #qkey(builder: string, task: string): string {
+    return k("q", seqKey(this.#topo.rank.get(builder) as number), builder, task);
   }
 
   #qrow(attempts = 0): string {
     return JSON.stringify({ g: `${this.#id}.${++this.#tokens}`, a: attempts });
   }
 
-  /** Queue every task that depends on row (signal, key); writes go to `writes`. */
-  async #enqueueDependents(signal: string, key: string, writes: Map<string, Write>): Promise<void> {
-    for (const id of this.#topo.readersOf(signal)) {
-      const cell = this.#topo.cell(id);
-      if (!cell.inputs.includes(signal)) continue;
-      set(writes, this.#qkey(id, cell.kind === "reduce" ? "*" : key), this.#qrow());
+  /** Queue every task that depends on row (collection, key); writes go to `writes`. */
+  async #enqueueDependents(
+    collection: string,
+    key: string,
+    writes: Map<string, Write>,
+  ): Promise<void> {
+    for (const id of this.#topo.readersOf(collection)) {
+      const builder = this.#topo.builder(id);
+      if (!builder.inputs.includes(collection)) continue;
+      set(writes, this.#qkey(id, builder.kind === "reduce" ? "*" : key), this.#qrow());
     }
-    for await (const [xkey] of this.#kv.scan(kp("x", signal, key))) {
-      const [, , , cell, task] = split(xkey) as [string, string, string, string, string];
-      set(writes, this.#qkey(cell, task), this.#qrow());
+    for await (const [xkey] of this.#kv.scan(kp("x", collection, key))) {
+      const [, , , builder, task] = split(xkey) as [string, string, string, string, string];
+      set(writes, this.#qkey(builder, task), this.#qrow());
     }
-    for await (const [xkey] of this.#kv.scan(kp("xl", signal))) {
-      const [, , cell, task] = split(xkey) as [string, string, string, string];
-      set(writes, this.#qkey(cell, task), this.#qrow());
+    for await (const [xkey] of this.#kv.scan(kp("xl", collection))) {
+      const [, , builder, task] = split(xkey) as [string, string, string, string];
+      set(writes, this.#qkey(builder, task), this.#qrow());
     }
   }
 
   // ---- task execution -----------------------------------------------------
 
   async #execute(claim: Claim, stats: RunStats): Promise<void> {
-    const cell = this.#topo.cell(claim.cell);
-    const rawTrace = await this.#kv.get(k("f", claim.cell, claim.task));
+    const builder = this.#topo.builder(claim.builder);
+    const rawTrace = await this.#kv.get(k("f", claim.builder, claim.task));
     const trace: Trace = rawTrace ? (JSON.parse(rawTrace) as Trace) : EMPTY_TRACE;
 
-    if (cell.kind !== "reduce" && !(await this.#alive(cell, claim.task))) {
+    if (builder.kind !== "reduce" && !(await this.#alive(builder, claim.task))) {
       await this.#commitTask(claim, trace, rawTrace, undefined, new Map());
       stats.executed++;
       return;
@@ -230,9 +234,9 @@ export class QueueEngine implements Engine {
     let error: unknown;
     let failed = false;
     try {
-      await cell.run(this.#context(cell, claim.task, reads, lists, emitted));
+      await builder.run(this.#context(builder, claim.task, reads, lists, emitted));
       // Ownership: every emitted row must be unowned or owned by this task.
-      const self = k(claim.cell, claim.task);
+      const self = k(claim.builder, claim.task);
       for (const { ref } of emitted.values()) {
         const row = await this.#row(ref[0], ref[1]);
         if (row && row.owner !== "" && row.owner !== self) {
@@ -259,52 +263,58 @@ export class QueueEngine implements Engine {
     stats.executed++;
   }
 
-  /** A map task is alive while its key exists on at least one input signal. */
-  async #alive(cell: CellDef, key: string): Promise<boolean> {
-    for (const s of cell.inputs)
+  /** A map task is alive while its key exists on at least one input collection. */
+  async #alive(builder: BuilderDef, key: string): Promise<boolean> {
+    for (const s of builder.inputs)
       if ((await this.#kv.get(k("r", s, key))) !== undefined) return true;
     return false;
   }
 
   #context(
-    cell: CellDef,
+    builder: BuilderDef,
     taskKey: string,
     reads: Map<string, Ref>,
     lists: Set<string>,
     emitted: Map<string, { ref: Ref; json: string }>,
   ): TaskContext {
-    const readable = new Set([...cell.inputs, ...(cell.reads ?? [])]);
-    const isMap = cell.kind !== "reduce";
-    const check = (signal: string) => {
-      if (!readable.has(signal)) throw new Error(`Cell "${cell.id}" read undeclared "${signal}"`);
+    const readable = new Set([...builder.inputs, ...(builder.reads ?? [])]);
+    const isMap = builder.kind !== "reduce";
+    const check = (collection: string) => {
+      if (!readable.has(collection))
+        throw new Error(`Builder "${builder.id}" read undeclared "${collection}"`);
     };
     return {
       key: taskKey,
-      get: async (signal, key) => {
-        check(signal);
+      get: async (collection, key) => {
+        check(collection);
         // A map task's own input rows are covered by static triggering.
-        if (!(isMap && key === taskKey && cell.inputs.includes(signal))) {
-          reads.set(k(signal, key), [signal, key]);
+        if (!(isMap && key === taskKey && builder.inputs.includes(collection))) {
+          reads.set(k(collection, key), [collection, key]);
         }
-        const row = await this.#row(signal, key);
+        const row = await this.#row(collection, key);
         return row === undefined ? undefined : (JSON.parse(row.json) as Json);
       },
-      list: async (signal) => {
-        check(signal);
-        if (!(cell.kind === "reduce" && cell.inputs.includes(signal))) lists.add(signal);
-        return this.list(signal);
+      list: async (collection) => {
+        check(collection);
+        if (!(builder.kind === "reduce" && builder.inputs.includes(collection)))
+          lists.add(collection);
+        return this.list(collection);
       },
-      emit: (signal, key, value) => {
-        if (!cell.outputs.includes(signal)) {
-          throw new Error(`Cell "${cell.id}" emitted to undeclared signal "${signal}"`);
+      emit: (collection, key, value) => {
+        if (!builder.outputs.includes(collection)) {
+          throw new Error(
+            `Builder "${builder.id}" emitted to undeclared collection "${collection}"`,
+          );
         }
         const json = canonicalJson(value);
-        const id = k(signal, key);
+        const id = k(collection, key);
         const prior = emitted.get(id);
         if (prior && prior.json !== json) {
-          throw new ConflictingEmission(`${signal}/${key}: emitted twice with different values`);
+          throw new ConflictingEmission(
+            `${collection}/${key}: emitted twice with different values`,
+          );
         }
-        emitted.set(id, { ref: [signal, key], json });
+        emitted.set(id, { ref: [collection, key], json });
       },
     };
   }
@@ -322,8 +332,8 @@ export class QueueEngine implements Engine {
     next: Trace | undefined,
     emitted: Map<string, { ref: Ref; json: string }>,
   ): Promise<void> {
-    const { cell, task } = claim;
-    const self = k(cell, task);
+    const { builder, task } = claim;
+    const self = k(builder, task);
     await this.#locked(async () => {
       const writes = new Map<string, Write>();
       for (const { ref, json } of emitted.values()) {
@@ -341,15 +351,16 @@ export class QueueEngine implements Engine {
       }
       // Trace + reverse index.
       const nextRaw = next ? JSON.stringify(next) : undefined;
-      if (nextRaw !== rawPrev) set(writes, k("f", cell, task), nextRaw);
+      if (nextRaw !== rawPrev) set(writes, k("f", builder, task), nextRaw);
       const before = new Set(prev.r.map((r) => k(r[0], r[1])));
       const after = new Set((next?.r ?? []).map((r) => k(r[0], r[1])));
-      for (const id of before) if (!after.has(id)) set(writes, k("x", id, cell, task), undefined);
-      for (const id of after) if (!before.has(id)) set(writes, k("x", id, cell, task), "");
+      for (const id of before)
+        if (!after.has(id)) set(writes, k("x", id, builder, task), undefined);
+      for (const id of after) if (!before.has(id)) set(writes, k("x", id, builder, task), "");
       const lb = new Set(prev.l);
       const la = new Set(next?.l ?? []);
-      for (const s of lb) if (!la.has(s)) set(writes, k("xl", s, cell, task), undefined);
-      for (const s of la) if (!lb.has(s)) set(writes, k("xl", s, cell, task), "");
+      for (const s of lb) if (!la.has(s)) set(writes, k("xl", s, builder, task), undefined);
+      for (const s of la) if (!lb.has(s)) set(writes, k("xl", s, builder, task), "");
       // Dequeue unless re-queued since the claim (by a dependency we just wrote,
       // or by a write that landed while the task ran).
       if (!writes.has(claim.qkey)) {
@@ -358,8 +369,8 @@ export class QueueEngine implements Engine {
           set(writes, claim.qkey, undefined);
         }
       }
-      if ((await this.#kv.get(k("d", cell, task))) !== undefined) {
-        set(writes, k("d", cell, task), undefined);
+      if ((await this.#kv.get(k("d", builder, task))) !== undefined) {
+        set(writes, k("d", builder, task), undefined);
       }
       await this.#kv.commit([...writes.values()]);
     });
@@ -384,7 +395,7 @@ export class QueueEngine implements Engine {
       await this.#kv.commit([
         { key: claim.qkey },
         {
-          key: k("d", claim.cell, claim.task),
+          key: k("d", claim.builder, claim.task),
           value: JSON.stringify({ attempts, error: errorText(error) }),
         },
       ]);
@@ -394,8 +405,11 @@ export class QueueEngine implements Engine {
 
   // ---- storage helpers ----------------------------------------------------
 
-  async #row(signal: string, key: string): Promise<{ owner: string; json: string } | undefined> {
-    const raw = await this.#kv.get(k("r", signal, key));
+  async #row(
+    collection: string,
+    key: string,
+  ): Promise<{ owner: string; json: string } | undefined> {
+    const raw = await this.#kv.get(k("r", collection, key));
     if (raw === undefined) return undefined;
     const i = raw.indexOf(OWNER_SEP);
     return { owner: raw.slice(0, i), json: raw.slice(i + 1) };

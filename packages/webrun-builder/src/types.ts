@@ -3,47 +3,47 @@ import type { KV } from "./store/kv.js";
 
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
-/** A row of a signal. */
+/** A row of a collection. */
 export interface Row {
   key: string;
   value: Json;
 }
 
-/** A reference to a row: `signal/key`. */
+/** A reference to a row: `collection/key`. */
 export interface RowRef {
-  signal: string;
+  collection: string;
   key: string;
 }
 
 /**
- * What a task sees. Reads are its dependencies: when a row it read (or a signal
+ * What a task sees. Reads are its dependencies: when a row it read (or a collection
  * it listed) changes, the task runs again. Reads may be dynamic — which rows a
- * task reads may depend on values it read — as long as the signal is declared
- * in the cell's `inputs` or `reads`.
+ * task reads may depend on values it read — as long as the collection is declared
+ * in the builder's `inputs` or `reads`.
  */
 export interface TaskContext {
-  /** The task key: the row key for a map cell, `"*"` for a reduce cell. */
+  /** The task key: the row key for a map builder, `"*"` for a reduce builder. */
   readonly key: string;
   /** Read one row (a tracked dependency). */
-  get(signal: string, key: string): Promise<Json | undefined>;
-  /** Read a whole signal ordered by key (a tracked dependency on the signal). */
-  list(signal: string): Promise<Row[]>;
+  get(collection: string, key: string): Promise<Json | undefined>;
+  /** Read a whole collection ordered by key (a tracked dependency on the collection). */
+  list(collection: string): Promise<Row[]>;
   /** Produce an output row. Everything a task emits in a successful run is its output set. */
-  emit(signal: string, key: string, value: Json): void;
+  emit(collection: string, key: string, value: Json): void;
   /**
-   * Incremental reduce cells only: the state the task saved with `setState` in
+   * Incremental reduce builders only: the state the task saved with `setState` in
    * its last successful run; `undefined` on the first run or after
    * `invalidate` — then recompute from `list` and save a fresh state.
    */
   readonly state: Json | undefined;
-  /** Incremental reduce cells only: save state for the next run (small: it is stored with the trace). */
+  /** Incremental reduce builders only: save state for the next run (small: it is stored with the trace). */
   setState(state: Json): void;
   /**
-   * Incremental reduce cells only: the rows of input `signal` that changed
+   * Incremental reduce builders only: the rows of input `collection` that changed
    * since the last successful run, with their current value (`undefined` if
    * removed) and their value at that run (`undefined` if new).
    */
-  changes(signal: string): Promise<Change[]>;
+  changes(collection: string): Promise<Change[]>;
 }
 
 export interface Change {
@@ -53,12 +53,12 @@ export interface Change {
 }
 
 /**
- * A cell: a pure function run per task.
+ * A builder: a pure function run per task.
  *
  * - `kind: "map"` (default) — one task per key present on any of `inputs`. When the
  *   key is gone from every input, the task is dead: its outputs are retracted and
  *   `dispose` is called; `run` is not.
- * - `kind: "reduce"` — one task (key `"*"`) that aggregates whole signals via
+ * - `kind: "reduce"` — one task (key `"*"`) that aggregates whole collections via
  *   `ctx.list`; it runs at least once, and again whenever anything it read changed.
  *
  * Each output row has exactly one producing task; a second producer fails with
@@ -66,16 +66,16 @@ export interface Change {
  * change (early cut-off). Rows a task stops emitting are retracted, and the
  * retraction cascades.
  */
-export interface CellDef {
+export interface BuilderDef {
   id: string;
   kind?: "map" | "reduce";
-  /** Signals whose keys define this cell's tasks (map) or that it aggregates (reduce). */
+  /** Collections whose keys define this builder's tasks (map) or that it aggregates (reduce). */
   inputs: readonly string[];
-  /** Extra signals the cell may read with `ctx.get` / `ctx.list`. */
+  /** Extra collections the builder may read with `ctx.get` / `ctx.list`. */
   reads?: readonly string[];
   outputs: readonly string[];
   /**
-   * Reduce cells only: fold `ctx.changes()` into `ctx.state` instead of
+   * Reduce builders only: fold `ctx.changes()` into `ctx.state` instead of
    * re-listing the inputs on every change. The engine then records, per input
    * row change, the value the row had at the task's last run.
    */
@@ -92,7 +92,7 @@ export interface CellDef {
 export interface BuildEngineOptions {
   /** Where all state lives: rows, queue, traces, dead letters. */
   store: KV;
-  cells: readonly CellDef[];
+  builders: readonly BuilderDef[];
   /** Attempts before a failing task moves to the dead letter (default 3). */
   maxAttempts?: number;
   /**
@@ -147,14 +147,14 @@ export interface RunStats {
 }
 
 export interface DeadLetter {
-  cell: string;
+  builder: string;
   key: string;
   attempts: number;
   error: string;
 }
 
 export interface BuildStatus {
-  /** Queued tasks per cell (cells with none are omitted). */
+  /** Queued tasks per builder (builders with none are omitted). */
   queued: Record<string, number>;
   deadLetters: number;
 }

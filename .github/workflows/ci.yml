@@ -8,3 +8,204 @@ on:
 jobs:
   ci:
     uses: statewalker/.github/.github/workflows/ci.yml@main
+
+  # Every merge to main publishes: there is no version pull request.
+  #
+  # `release` (after a green CI on main): writes the changesets nobody wrote by hand
+  # (statewalker/.github's scripts/release-changesets.mjs: a patch for every public package whose
+  # packed files or published manifest differ from npm's `latest`, a minor (0.x) / major when a
+  # dependency moved to another breaking line), applies all pending changesets with
+  # `changeset version` (versions + CHANGELOG.md), commits that as "chore: version packages" to
+  # main, and packs every public package whose version npm lacks. Pushes made with the workflow
+  # token do not start another run (the version commit gets no CI of its own). When main moved
+  # on while this run was going, it steps aside: the run of the newer merge releases everything.
+  #
+  # `publish`: uploads the tarballs with npm trusted publishing (OIDC): no npm token is stored in
+  # GitHub. The provenance attestation names the merged commit that started the run (the source
+  # the tarballs were built from); the GitHub release tags the version commit. npm's trusted
+  # publisher for each package must name this repository, this file (ci.yml) and the `npm`
+  # environment. A trusted publisher can only be added to a package that exists, so a package
+  # npm has never seen is skipped with a warning: publish its first version by hand.
+  release:
+    needs: ci
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-${{ github.repository }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    outputs:
+      any: ${{ steps.pack.outputs.any }}
+      sha: ${{ steps.version.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          # The write token is used by the push step only, not left in .git/config for
+          # install and build scripts.
+          persist-credentials: false
+
+      - name: Release scripts
+        uses: actions/checkout@v7
+        with:
+          repository: statewalker/.github
+          ref: main
+          path: .statewalker-ci
+
+      - name: Move the release scripts out of the workspace
+        run: mv .statewalker-ci "$RUNNER_TEMP/statewalker-ci"
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm run --if-present build
+
+      - name: Changesets for unreleased changes
+        run: node "$RUNNER_TEMP/statewalker-ci/scripts/release-changesets.mjs"
+
+      # Applies the pending changesets and commits the new versions to main. Skipped (with
+      # nothing packed) when main moved on: the newer merge's run releases, and a re-run of an
+      # old run cannot push a stale version commit.
+      - name: Version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git fetch --quiet "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" main
+          if [ "$(git rev-parse FETCH_HEAD)" != "$GITHUB_SHA" ]; then
+            echo "main moved on since $GITHUB_SHA: the newer run releases."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          if ! ls .changeset/*.md 2>/dev/null | grep -qv '/README.md$'; then
+            echo "No pending changesets."
+            exit 0
+          fi
+          pnpm exec changeset version
+          pnpm install --lockfile-only
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: version packages"
+          # The packed tarballs must carry the new versions: build before pushing, so a failed
+          # build leaves main untouched.
+          pnpm run --if-present build
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # `pnpm pack` writes the published manifest: workspace: and catalog: become version ranges.
+      - name: Pack what npm lacks
+        id: pack
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/out"
+          for dir in packages/*/; do
+            read -r name version private < <(node -p "const p=require('./${dir}package.json');[p.name,p.version,!!p.private].join(' ')")
+            [ "$private" = true ] && continue
+            npm view "$name@$version" version >/dev/null 2>&1 && continue
+            if ! npm view "$name" name >/dev/null 2>&1; then
+              echo "::warning::$name is not on npm yet: publish its first version by hand (trusted publishing needs an existing package)"
+              continue
+            fi
+            (cd "$dir" && pnpm pack --pack-destination "$RUNNER_TEMP/out")
+          done
+          ls "$RUNNER_TEMP/out"/*.tgz >/dev/null 2>&1 && echo "any=true" >> "$GITHUB_OUTPUT" || echo "any=false" >> "$GITHUB_OUTPUT"
+
+      - if: steps.pack.outputs.any == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: packages
+          path: ${{ runner.temp }}/out/*.tgz
+
+  # Publishes the tarballs packed above with OIDC (trusted publishing, provenance) and tags each
+  # one as a GitHub release. Runs in the `npm` environment, which npm's trusted publishers name:
+  # with no required reviewers on that environment every merge publishes at once; add reviewers
+  # to gate releases behind an approval.
+  publish:
+    needs: release
+    if: needs.release.outputs.any == 'true'
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+
+      # Pinned: trusted publishing needs npm 11.5.1 or later.
+      - name: npm
+        run: npm install --global npm@11.19.0 && npm --version
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: packages
+          path: packages
+
+      # Skips a version already on npm: a first version published by hand while this job waited
+      # for approval, or what an earlier attempt of a re-run job published. Publishes in dependency
+      # order, so a package never reaches npm before a new version it depends on.
+      # A version older than npm's `latest` (an old run approved after a newer release) is
+      # published under the `backport` dist-tag, and a prerelease under `next`, so `latest` never
+      # moves backwards. Only npm's "not found" (E404) counts as no `latest`; any other failure to
+      # read it stops the step rather than publish blind.
+      - name: Publish
+        run: |
+          order=$(node -e '
+            const { execFileSync } = require("node:child_process");
+            const files = process.argv.slice(1);
+            const pkg = new Map(files.map((f) => [f, JSON.parse(execFileSync("tar", ["-xzOf", f, "package/package.json"]))]));
+            const byName = new Map([...pkg].map(([f, p]) => [p.name, f]));
+            const out = [], seen = new Set();
+            const visit = (f) => {
+              if (seen.has(f)) return;
+              seen.add(f);
+              const p = pkg.get(f);
+              for (const d of Object.keys({ ...p.dependencies, ...p.peerDependencies })) if (byName.has(d)) visit(byName.get(d));
+              out.push(f);
+            };
+            files.forEach(visit);
+            console.log(out.join("\n"));
+          ' packages/*.tgz)
+          for t in $order; do
+            read -r name version < <(tar -xzOf "$t" package/package.json | node -p "const p=JSON.parse(require('fs').readFileSync(0));p.name+' '+p.version")
+            if npm view "$name@$version" version >/dev/null 2>&1; then echo "$name@$version: already on npm"; continue; fi
+            if ! latest=$(npm view "$name" dist-tags.latest 2>"$RUNNER_TEMP/view.err"); then
+              grep -q E404 "$RUNNER_TEMP/view.err" || { cat "$RUNNER_TEMP/view.err"; echo "$name: cannot read npm's latest"; exit 1; }
+              latest=""
+            fi
+            if [[ "$version" == *-* ]]; then
+              echo "$name@$version is a prerelease: published as next"
+              npm publish "./$t" --provenance --access public --tag next
+              continue
+            fi
+            older=$(node -e 'const n=(v)=>v.split("-")[0].split(".").map(Number);const [a,b]=[n(process.argv[1]),n(process.argv[2]||"0.0.0")];for(let i=0;i<3;i++){if(a[i]!==b[i]){console.log(a[i]<b[i]);process.exit()}}console.log(false)' "$version" "$latest")
+            if [ "$older" = true ]; then
+              echo "$name@$version is older than latest $latest: published as backport"
+              npm publish "./$t" --provenance --access public --tag backport
+            else
+              npm publish "./$t" --provenance --access public
+            fi
+          done
+
+      - name: Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for t in packages/*.tgz; do
+            tag=$(tar -xzOf "$t" package/package.json | node -p "const p=JSON.parse(require('fs').readFileSync(0));p.name+'@'+p.version")
+            gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && continue
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "${{ needs.release.outputs.sha }}" --notes "Published to npm."
+          done

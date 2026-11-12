@@ -26,7 +26,7 @@ tools/      private test harness (consumer-install)
 
 | Package | Description | npm |
 | --- | --- | --- |
-| [`@statewalker/webrun-builder`](packages/webrun-builder) | `BuildEngine`: key-level incremental, resumable build engine — cells over signals with dynamic dependencies, early cut-off, retraction and dead letters; state in a pluggable KV (memory, `FilesApi`, SQLite); `scanSources` for file trees. | [npm](https://www.npmjs.com/package/@statewalker/webrun-builder) |
+| [`@statewalker/webrun-builder`](packages/webrun-builder) | `BuildEngine`: key-level incremental, resumable build engine — builders over collections with dynamic dependencies, early cut-off, retraction and dead letters; state in a pluggable KV (memory, `FilesApi`, SQLite); `scanSources` for file trees. | [npm](https://www.npmjs.com/package/@statewalker/webrun-builder) |
 | [`@statewalker/webrun-modules`](packages/webrun-modules) | Isomorphic module server: resolves, downloads and transforms npm packages and authored TS/JS into ESM, served from a `FilesApi` cache. | [npm](https://www.npmjs.com/package/@statewalker/webrun-modules) |
 | [`@statewalker/webrun-modules-build`](packages/webrun-modules-build) | Batch module build: runs the `webrun-modules` transforms through `BuildEngine` and writes a static `.js`/`.css` tree. | [npm](https://www.npmjs.com/package/@statewalker/webrun-modules-build) |
 | [`@statewalker/webrun-tailwind`](packages/webrun-tailwind) | Build-only Tailwind CSS v4 transform for the `webrun-modules` transform registry (Node only). | [npm](https://www.npmjs.com/package/@statewalker/webrun-tailwind) |
@@ -133,10 +133,27 @@ ones use the catalog, lint, format, build, typecheck and tests, then checks that
 every `exports` target exists, every bare import in `dist/` is a declared
 dependency, and packed manifests contain no `workspace:` or `catalog:` specifiers.
 
-Packages are published to npm from CI with changesets: changed packages get a
-version pull request, and merging it publishes them with npm provenance. Add a
+**Every merge to `main` publishes.** After a green CI on `main`, the `release` job:
+1. writes a changeset for every public package whose packed files or published
+   manifest differ from npm's `latest` (a patch; a minor/major when a dependency
+   moved to another breaking line);
+2. applies all pending changesets (`changeset version`: versions and
+   `CHANGELOG.md`) and commits them to `main` as "chore: version packages";
+3. packs every public package whose version npm lacks.
+
+The `publish` job then uploads them with npm trusted publishing (OIDC, no token
+in GitHub) and provenance, and tags a GitHub release per package. Add a
 changeset yourself (`pnpm changeset`) to choose the bump level or the changelog
 text. Dependency updates come from Renovate.
+
+One-time set-up: npm's trusted publisher for each package names
+this repository, `ci.yml` and the `npm` environment; the `npm` environment has no
+required reviewers (add some to gate releases behind an approval); the workflow
+token may push to `main` (branch protection must allow `github-actions[bot]`).
+A package npm has never seen is skipped with a warning until its first version is
+published by hand. When `main` moves on while a release runs, that run steps aside
+and the newer merge's run releases everything; the version commit gets no CI run
+of its own.
 
 ### Configuration files
 

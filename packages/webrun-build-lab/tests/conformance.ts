@@ -22,11 +22,11 @@ import {
   upper,
 } from "../src/core/fixtures.js";
 import { CrashError, CrashingKV, type KV, MemKV } from "../src/core/kv.js";
-import type { CellDef, Engine, EngineFactory, Json } from "../src/core/types.js";
+import type { BuilderDef, Engine, EngineFactory, Json } from "../src/core/types.js";
 import { NaiveEngine } from "../src/prototypes/naive.js";
 
-const ALL_CELLS = [split, upper, len, double, stats, left, right, join, compile, bundle];
-const ALL_SIGNALS = [
+const ALL_BUILDERS = [split, upper, len, double, stats, left, right, join, compile, bundle];
+const ALL_COLLECTIONS = [
   "chunks",
   "upper",
   "len",
@@ -42,17 +42,17 @@ const ALL_SIGNALS = [
 type Sources = Map<string, Map<string, Json>>;
 
 async function apply(engine: Engine, sources: Sources): Promise<void> {
-  for (const [signal, rows] of sources) {
-    for (const [key, value] of rows) await engine.put(signal, key, value);
+  for (const [collection, rows] of sources) {
+    for (const [key, value] of rows) await engine.put(collection, key, value);
   }
 }
 
-/** The reference state for `sources` under `cells`. */
-async function expected(cells: CellDef[], sources: Sources, signals = ALL_SIGNALS) {
-  const ref = new NaiveEngine({ kv: new MemKV(), cells });
+/** The reference state for `sources` under `builders`. */
+async function expected(builders: BuilderDef[], sources: Sources, collections = ALL_COLLECTIONS) {
+  const ref = new NaiveEngine({ kv: new MemKV(), builders });
   await apply(ref, sources);
   await ref.run();
-  return snapshot(ref, signals);
+  return snapshot(ref, collections);
 }
 
 async function drain(engine: Engine): Promise<number> {
@@ -72,8 +72,8 @@ export function defineConformance(
   factory: EngineFactory,
   newKv: () => KV & { metrics: { commits: number } } = () => new MemKV(),
 ): void {
-  const make = (cells: CellDef[], kv: KV = newKv(), maxAttempts?: number) =>
-    factory({ kv, cells, maxAttempts });
+  const make = (builders: BuilderDef[], kv: KV = newKv(), maxAttempts?: number) =>
+    factory({ kv, builders, maxAttempts });
 
   describe(`${name} — conformance`, () => {
     describe("cascade", () => {
@@ -145,7 +145,7 @@ export function defineConformance(
       });
 
       it("treats null as a value, not a deletion", async () => {
-        const echo: CellDef = {
+        const echo: BuilderDef = {
           id: "echo",
           inputs: ["docs"],
           outputs: ["out"],
@@ -174,7 +174,7 @@ export function defineConformance(
         expect(await engine.list("upper")).toEqual([{ key: "b#0", value: "BYE" }]);
         expect(await engine.list("len")).toEqual([{ key: "b", value: 3 }]);
         expect(await engine.get("stats", "total")).toEqual({ count: 1, sum: 3 });
-        // Dead map tasks are retracted without calling the cell.
+        // Dead map tasks are retracted without calling the builder.
         expect(rec.log).toEqual(["stats/*"]);
       });
 
@@ -199,10 +199,10 @@ export function defineConformance(
         expect(await engine.list("upper")).toEqual([{ key: "a#0", value: "X" }]);
       });
 
-      it("rejects writes to derived signals", async () => {
+      it("rejects writes to derived collections", async () => {
         const engine = make([split]);
-        await expect(engine.put("chunks", "a", 1)).rejects.toThrow(/not a source signal/);
-        await expect(engine.remove("chunks", "a")).rejects.toThrow(/not a source signal/);
+        await expect(engine.put("chunks", "a", 1)).rejects.toThrow(/not a source collection/);
+        await expect(engine.remove("chunks", "a")).rejects.toThrow(/not a source collection/);
       });
     });
 
@@ -221,7 +221,7 @@ export function defineConformance(
         expect(await engine.get("j", "a")).toBe("L(y)+R(y)");
       });
 
-      it("a reduce cell runs once per run, after all its producers", async () => {
+      it("a reduce builder runs once per run, after all its producers", async () => {
         const rec = recorder();
         const engine = make(recorded(rec, [stats, len]));
         for (const key of ["a", "b", "c", "d"]) await engine.put("docs", key, key.repeat(2));
@@ -234,7 +234,7 @@ export function defineConformance(
       it("keeps a change that lands while its task runs, and converges to it", async () => {
         const seen: Json[] = [];
         let engine: Engine;
-        const copy: CellDef = {
+        const copy: BuilderDef = {
           id: "copy",
           inputs: ["docs"],
           outputs: ["out"],
@@ -253,8 +253,8 @@ export function defineConformance(
       });
 
       it("can be interrupted after any task and resumed (maxTasks)", async () => {
-        const cells = [split, upper, len, double, stats, left, right, join];
-        const engine = make(cells);
+        const builders = [split, upper, len, double, stats, left, right, join];
+        const engine = make(builders);
         const sources: Sources = new Map([
           [
             "docs",
@@ -275,7 +275,7 @@ export function defineConformance(
           if (runs > 200) throw new Error("did not converge");
         }
         expect(runs).toBeGreaterThan(3);
-        expect(await snapshot(engine, ALL_SIGNALS)).toEqual(await expected(cells, sources));
+        expect(await snapshot(engine, ALL_COLLECTIONS)).toEqual(await expected(builders, sources));
       });
     });
 
@@ -345,7 +345,7 @@ export function defineConformance(
     });
 
     describe("failures", () => {
-      const flaky = (fail: (key: string, value: Json) => boolean): CellDef => ({
+      const flaky = (fail: (key: string, value: Json) => boolean): BuilderDef => ({
         id: "copy",
         inputs: ["docs"],
         outputs: ["out"],
@@ -376,7 +376,7 @@ export function defineConformance(
         expect(calls).toBe(3);
         expect(await engine.list("out")).toEqual([{ key: "good", value: 1 }]);
         expect(await engine.deadLetters()).toEqual([
-          { cell: "copy", key: "bad", attempts: 3, error: "Error: boom" },
+          { builder: "copy", key: "bad", attempts: 3, error: "Error: boom" },
         ]);
         const again = await engine.run();
         expect(again).toMatchObject({ executed: 0, failed: 0 });
@@ -400,7 +400,7 @@ export function defineConformance(
       });
 
       it("fails a task that emits a row another task owns", async () => {
-        const a: CellDef = {
+        const a: BuilderDef = {
           id: "a",
           inputs: ["docs"],
           outputs: ["out"],
@@ -417,7 +417,7 @@ export function defineConformance(
       });
 
       it("rejects undeclared reads and emissions", async () => {
-        const bad: CellDef = {
+        const bad: BuilderDef = {
           id: "bad",
           inputs: ["docs"],
           outputs: ["out"],
@@ -433,7 +433,7 @@ export function defineConformance(
     });
 
     describe("durability", () => {
-      const cells = [split, upper, len, double, stats, left, right, join, compile, bundle];
+      const builders = [split, upper, len, double, stats, left, right, join, compile, bundle];
       const sources: Sources = new Map<string, Map<string, Json>>([
         [
           "docs",
@@ -456,11 +456,11 @@ export function defineConformance(
       it("state survives a new engine instance over the same store", async () => {
         const kv = newKv();
         const rec = recorder();
-        const e1 = make(recorded(rec, cells), kv);
+        const e1 = make(recorded(rec, builders), kv);
         await apply(e1, sources);
         await e1.run();
         rec.reset();
-        const e2 = make(recorded(rec, cells), kv);
+        const e2 = make(recorded(rec, builders), kv);
         expect((await e2.run()).executed).toBe(0);
         expect(rec.log).toEqual([]);
         await e2.put("docs", "c", "six");
@@ -480,10 +480,10 @@ export function defineConformance(
       });
 
       it("resumes after a crash at any commit and converges to the reference state", async () => {
-        const want = await expected(cells, sources);
+        const want = await expected(builders, sources);
         // Count commits of a clean run to know the crash points.
         const probeKv = newKv();
-        const probe = make(cells, probeKv);
+        const probe = make(builders, probeKv);
         await apply(probe, sources);
         const before = probeKv.metrics.commits;
         const clean = await drain(probe);
@@ -492,13 +492,13 @@ export function defineConformance(
 
         for (let failAt = 1; failAt <= total; failAt++) {
           const kv = newKv();
-          await apply(make(cells, kv), sources);
-          const crashing = make(cells, new CrashingKV(kv, failAt));
+          await apply(make(builders, kv), sources);
+          const crashing = make(builders, new CrashingKV(kv, failAt));
           await expect(drain(crashing)).rejects.toBeInstanceOf(CrashError);
           const rec = recorder();
-          const resumed = make(recorded(rec, cells), kv);
+          const resumed = make(recorded(rec, builders), kv);
           await drain(resumed);
-          expect(await snapshot(resumed, ALL_SIGNALS), `crash at ${failAt}`).toEqual(want);
+          expect(await snapshot(resumed, ALL_COLLECTIONS), `crash at ${failAt}`).toEqual(want);
           // Committed work is not redone: the resumed run does at most a clean run's work.
           expect(rec.log.length, `rework after crash at ${failAt}`).toBeLessThanOrEqual(clean);
         }
@@ -507,10 +507,10 @@ export function defineConformance(
 
     describe("model check", () => {
       it("matches full recompute over random edit sequences", async () => {
-        const cells = ALL_CELLS;
+        const builders = ALL_BUILDERS;
         for (const seed of [1, 2, 3, 4, 5]) {
           const rand = rng(seed);
-          const engine = make(cells);
+          const engine = make(builders);
           const sources: Sources = new Map([
             ["docs", new Map()],
             ["mods", new Map()],
@@ -545,8 +545,8 @@ export function defineConformance(
             // Interrupt now and then.
             if (rand() < 0.3) await engine.run({ maxTasks: 1 + Math.floor(rand() * 3) });
             await drain(engine);
-            expect(await snapshot(engine, ALL_SIGNALS), `seed ${seed} step ${step}`).toEqual(
-              await expected(cells, sources),
+            expect(await snapshot(engine, ALL_COLLECTIONS), `seed ${seed} step ${step}`).toEqual(
+              await expected(builders, sources),
             );
           }
         }

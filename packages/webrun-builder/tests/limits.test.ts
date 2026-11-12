@@ -7,16 +7,16 @@ import { NodeSqlDriver } from "@statewalker/webrun-files-sqlite";
 import { describe, expect, it } from "vitest";
 import {
   BuildEngine,
-  type CellDef,
+  type BuilderDef,
   CrashError,
   CrashingKV,
   type Json,
   MemKV,
   SqlKV,
-} from "./index.js";
+} from "../src/index.js";
 
-const log = (cells: CellDef[], out: string[]): CellDef[] =>
-  cells.map((c) => ({
+const log = (builders: BuilderDef[], out: string[]): BuilderDef[] =>
+  builders.map((c) => ({
     ...c,
     run(ctx) {
       out.push(`${c.id}/${ctx.key}`);
@@ -24,7 +24,7 @@ const log = (cells: CellDef[], out: string[]): CellDef[] =>
     },
   }));
 
-const upper: CellDef = {
+const upper: BuilderDef = {
   id: "upper",
   inputs: ["docs"],
   outputs: ["up"],
@@ -34,7 +34,7 @@ const upper: CellDef = {
 };
 
 /** mods/<k> = { code, imports } → compiled/<k> = code + imported codes (dynamic reads). */
-const compile: CellDef = {
+const compile: BuilderDef = {
   id: "compile",
   inputs: ["mods"],
   outputs: ["compiled"],
@@ -52,7 +52,7 @@ const compile: CellDef = {
 describe("net no-op changes do not re-run tasks (verify before execute)", () => {
   it("remove + put back the same value before a run executes nothing", async () => {
     const ran: string[] = [];
-    const engine = new BuildEngine({ store: new MemKV(), cells: log([upper], ran) });
+    const engine = new BuildEngine({ store: new MemKV(), builders: log([upper], ran) });
     await engine.put("docs", "a", "x");
     await engine.run();
     ran.length = 0;
@@ -65,7 +65,7 @@ describe("net no-op changes do not re-run tasks (verify before execute)", () => 
 
   it("a dependency changed and changed back does not re-run its readers", async () => {
     const ran: string[] = [];
-    const engine = new BuildEngine({ store: new MemKV(), cells: log([compile], ran) });
+    const engine = new BuildEngine({ store: new MemKV(), builders: log([compile], ran) });
     await engine.put("mods", "main", { code: "M", imports: ["util"] });
     await engine.put("mods", "util", { code: "U", imports: [] });
     await engine.run();
@@ -78,7 +78,7 @@ describe("net no-op changes do not re-run tasks (verify before execute)", () => 
 
   it("still runs a task whose reads really changed", async () => {
     const ran: string[] = [];
-    const engine = new BuildEngine({ store: new MemKV(), cells: log([compile], ran) });
+    const engine = new BuildEngine({ store: new MemKV(), builders: log([compile], ran) });
     await engine.put("mods", "main", { code: "M", imports: ["util"] });
     await engine.put("mods", "util", { code: "U", imports: [] });
     await engine.run();
@@ -94,7 +94,7 @@ describe("a write that lands while a task runs is never lost", () => {
   it("a dynamically read source row changed mid-task re-runs the task", async () => {
     let engine: BuildEngine;
     let raced = false;
-    const racing: CellDef = {
+    const racing: BuilderDef = {
       ...compile,
       async run(ctx) {
         await compile.run(ctx);
@@ -104,7 +104,7 @@ describe("a write that lands while a task runs is never lost", () => {
         }
       },
     };
-    engine = new BuildEngine({ store: new MemKV(), cells: [racing] });
+    engine = new BuildEngine({ store: new MemKV(), builders: [racing] });
     await engine.put("mods", "main", { code: "M", imports: ["util"] });
     await engine.put("mods", "util", { code: "U", imports: [] });
     while ((await engine.run()).pending) {}
@@ -116,7 +116,7 @@ describe("a write that lands while a task runs is never lost", () => {
 describe("ownership hand-over inside one run", () => {
   it("a task takes over a row from a stale (queued) owner without failing", async () => {
     // `early` (upstream rank) and `late` both may emit out/shared, depending on their input.
-    const early: CellDef = {
+    const early: BuilderDef = {
       id: "early",
       inputs: ["a"],
       outputs: ["out"],
@@ -124,7 +124,7 @@ describe("ownership hand-over inside one run", () => {
         if ((await ctx.get("a", ctx.key)) === "claim") ctx.emit("out", "shared", "from-early");
       },
     };
-    const late: CellDef = {
+    const late: BuilderDef = {
       id: "late",
       inputs: ["b"],
       outputs: ["out", "late-done"],
@@ -133,7 +133,7 @@ describe("ownership hand-over inside one run", () => {
         ctx.emit("late-done", ctx.key, true);
       },
     };
-    const engine = new BuildEngine({ store: new MemKV(), cells: [early, late], maxAttempts: 1 });
+    const engine = new BuildEngine({ store: new MemKV(), builders: [early, late], maxAttempts: 1 });
     await engine.put("a", "k", "idle");
     await engine.put("b", "k", "claim");
     await engine.run();
@@ -148,7 +148,7 @@ describe("ownership hand-over inside one run", () => {
   });
 
   it("a genuine conflict (both keep emitting) still fails the later task", async () => {
-    const both = (id: string, input: string): CellDef => ({
+    const both = (id: string, input: string): BuilderDef => ({
       id,
       inputs: [input],
       outputs: ["out"],
@@ -156,7 +156,7 @@ describe("ownership hand-over inside one run", () => {
     });
     const engine = new BuildEngine({
       store: new MemKV(),
-      cells: [both("one", "a"), both("two", "b")],
+      builders: [both("one", "a"), both("two", "b")],
       maxAttempts: 1,
     });
     await engine.put("a", "k", 1);
@@ -169,7 +169,7 @@ describe("ownership hand-over inside one run", () => {
 
 describe("incremental reduce", () => {
   /** sum/count over len rows, folded from changes; counts full listings. */
-  const make = (listed: { n: number }): CellDef => ({
+  const make = (listed: { n: number }): BuilderDef => ({
     id: "total",
     kind: "reduce",
     incremental: true,
@@ -197,7 +197,7 @@ describe("incremental reduce", () => {
       ctx.emit("total", "all", state as unknown as Json);
     },
   });
-  const len: CellDef = {
+  const len: BuilderDef = {
     id: "len",
     inputs: ["docs"],
     outputs: ["len"],
@@ -209,7 +209,7 @@ describe("incremental reduce", () => {
   it("folds changes (with previous values) instead of re-listing the input", async () => {
     const listed = { n: 0 };
     const store = new MemKV();
-    const engine = new BuildEngine({ store, cells: [len, make(listed)] });
+    const engine = new BuildEngine({ store, builders: [len, make(listed)] });
     for (const [k, v] of [
       ["a", "xx"],
       ["b", "yyy"],
@@ -229,7 +229,7 @@ describe("incremental reduce", () => {
 
     // State and pending changes survive a new engine instance.
     await engine.put("docs", "c", "zzzz"); // 1 → 4
-    const again = new BuildEngine({ store, cells: [len, make(listed)] });
+    const again = new BuildEngine({ store, builders: [len, make(listed)] });
     await again.run();
     expect(await again.get("total", "all")).toEqual({ sum: 11, count: 3 });
     expect(listed.n).toBe(1);
@@ -237,7 +237,7 @@ describe("incremental reduce", () => {
 
   it("invalidate resets the state (full recompute)", async () => {
     const listed = { n: 0 };
-    const engine = new BuildEngine({ store: new MemKV(), cells: [len, make(listed)] });
+    const engine = new BuildEngine({ store: new MemKV(), builders: [len, make(listed)] });
     await engine.put("docs", "a", "xx");
     await engine.run();
     await engine.invalidate("total");
@@ -246,15 +246,15 @@ describe("incremental reduce", () => {
     expect(await engine.get("total", "all")).toEqual({ sum: 2, count: 1 });
   });
 
-  it("rejects incremental on map cells", () => {
+  it("rejects incremental on map builders", () => {
     expect(
-      () => new BuildEngine({ store: new MemKV(), cells: [{ ...upper, incremental: true }] }),
-    ).toThrow(/only reduce cells can be incremental/);
+      () => new BuildEngine({ store: new MemKV(), builders: [{ ...upper, incremental: true }] }),
+    ).toThrow(/only reduce builders can be incremental/);
   });
 });
 
 describe("several engines (processes) on one store", () => {
-  const slowUpper = (ran: string[]): CellDef => ({
+  const slowUpper = (ran: string[]): BuilderDef => ({
     ...upper,
     async run(ctx) {
       ran.push(ctx.key);
@@ -268,13 +268,13 @@ describe("several engines (processes) on one store", () => {
     const ran: string[] = [];
     const a = new BuildEngine({
       store: new SqlKV(new NodeSqlDriver(db)),
-      cells: [slowUpper(ran)],
+      builders: [slowUpper(ran)],
       batchSize: 8,
       shared: true,
     });
     const b = new BuildEngine({
       store: new SqlKV(new NodeSqlDriver(db)),
-      cells: [slowUpper(ran)],
+      builders: [slowUpper(ran)],
       batchSize: 8,
       shared: true,
     });
@@ -296,12 +296,12 @@ describe("several engines (processes) on one store", () => {
     let now = 1_000;
     const store = new MemKV();
     const ran: string[] = [];
-    const seed = new BuildEngine({ store, cells: [upper] });
+    const seed = new BuildEngine({ store, builders: [upper] });
     for (const k of ["a", "b", "c"]) await seed.put("docs", k, k);
     // Process A claims a batch, then dies at its next commit (the batch commit).
     const crashing = new BuildEngine({
       store: new CrashingKV(store, 2),
-      cells: [upper],
+      builders: [upper],
       shared: true,
       leaseMs: 5_000,
       now: () => now,
@@ -310,7 +310,7 @@ describe("several engines (processes) on one store", () => {
     // Process B: the rows are leased by the dead process — nothing to do yet.
     const b = new BuildEngine({
       store,
-      cells: log([upper], ran),
+      builders: log([upper], ran),
       shared: true,
       leaseMs: 5_000,
       now: () => now,

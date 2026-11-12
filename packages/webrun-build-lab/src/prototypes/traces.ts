@@ -10,7 +10,7 @@
  * ---------
  * - `R`, the global revision, is bumped once per committed change: a source
  *   `put`/`remove`, or a task commit that changed at least one output row.
- *   Each signal stores the revision of its last change (`s|sig`), so `R` is the
+ *   Each collection stores the revision of its last change (`s|sig`), so `R` is the
  *   max over those rows and needs no counter row of its own.
  * - `V` (`m|v`) is "verified through": after a run that verified every trace,
  *   no trace is stale with respect to any change at or before `V`. `run()`
@@ -26,7 +26,7 @@
  * -----------------------------------------
  * - `list(sig)` dependency: stale iff `changedAt(sig) > w`.
  * - `get(sig,key)` dependency: skipped wholesale when `changedAt(sig) <= w`
- *   (signal-level pruning, from memory); otherwise the row is fetched and the
+ *   (collection-level pruning, from memory); otherwise the row is fetched and the
  *   trace is stale iff it was present and is now missing or has
  *   `changedAt > w`, or was missing and now exists. Remembering presence means
  *   deletions need no tombstones.
@@ -36,8 +36,8 @@
  * Task discovery (the one index beyond pure traces)
  * -------------------------------------------------
  * Map tasks appear/die when a key appears/disappears on an input. A pure-pull
- * engine would have to merge-scan every input signal against the traces each
- * run. Instead each row creation/deletion on a signal that some map cell is
+ * engine would have to merge-scan every input collection against the traces each
+ * run. Instead each row creation/deletion on a collection that some map builder is
  * keyed by appends `e|sig|seq(rev)|key` (an *existence* log; value updates are
  * not logged). A run scans each changed input's log after `V` to find the
  * candidate new/dead keys; the log is garbage-collected up to the new `V` at
@@ -45,26 +45,26 @@
  *
  * Inherent costs
  * --------------
- * - Verification is proportional to the number of traces of every cell that
- *   declares a changed signal: such a cell's traces are all scanned, and each
- *   trace with a `get` dependency on a changed signal costs a row read (memoised
+ * - Verification is proportional to the number of traces of every builder that
+ *   declares a changed collection: such a builder's traces are all scanned, and each
+ *   trace with a `get` dependency on a changed collection costs a row read (memoised
  *   per run). One edited doc among N therefore costs ~N trace rows scanned and
- *   ~N gets per affected cell, while the executions stay minimal. Cells whose
- *   declared signals did not change are skipped without reading anything.
+ *   ~N gets per affected builder, while the executions stay minimal. Builders whose
+ *   declared collections did not change are skipped without reading anything.
  *   A reverse index (row → readers) would remove this, but that is the eager
  *   design; a full row changelog would too, but that is the cursor design.
  * - Each task execution rewrites its trace (deps + outputs), and every change
- *   rewrites the per-signal `changedAt` row.
+ *   rewrites the per-collection `changedAt` row.
  * - Output rows store their owner task (for the one-producer rule) and their
  *   `changedAt`, so derived rows are a little larger than plain values.
  *
  * Assumptions: one live engine per store at a time. Cached state (`R`, `V`,
- * signal revisions) is loaded from the KV on first use and kept up to date by
+ * collection revisions) is loaded from the KV on first use and kept up to date by
  * this instance's own commits; a per-run row memo is dropped after each run.
  */
 import type { KV } from "../core/kv.js";
 import {
-  type CellDef,
+  type BuilderDef,
   ConflictingEmission,
   type DeadLetter,
   type Engine,
@@ -76,7 +76,7 @@ import {
 } from "../core/types.js";
 import { canonicalJson, errorText, k, kp, SEP, seqKey, split, Topology } from "../core/util.js";
 
-/** A stored row. `owner` is `k(cell, key)` of the producing task ("" for sources). */
+/** A stored row. `owner` is `k(builder, key)` of the producing task ("" for sources). */
 interface Row {
   at: number;
   owner: string;
@@ -84,8 +84,8 @@ interface Row {
 }
 
 /**
- * A task trace. `g`: get-deps per signal as [signal, presentKeys, missingKeys];
- * `l`: listed signals; `o`: outputs per signal; `f`: currently dead-lettered.
+ * A task trace. `g`: get-deps per collection as [collection, presentKeys, missingKeys];
+ * `l`: listed collections; `o`: outputs per collection; `f`: currently dead-lettered.
  */
 interface Trace {
   r: number;
@@ -97,13 +97,13 @@ interface Trace {
 
 type Write = { key: string; value?: string };
 type Reads = { gets: Map<string, Map<string, boolean>>; lists: Set<string> };
-type Change = { signal: string; key: string; json?: string; existence: boolean };
+type Change = { collection: string; key: string; json?: string; existence: boolean };
 
 const SEQ = 11; // seqKey width
 /** Sorts right after every `seq SEP …` key with the same seq. */
 const AFTER_SEP = String.fromCharCode(SEP.charCodeAt(0) + 1);
 
-/** Row value: `seq(at)` + (owner-cell SEP owner-key | "") + SEP + json. */
+/** Row value: `seq(at)` + (owner-builder SEP owner-key | "") + SEP + json. */
 function encodeRow(row: Row): string {
   return seqKey(row.at) + row.owner + SEP + row.json;
 }
@@ -121,7 +121,7 @@ export class TraceEngine implements Engine {
   readonly #kv: KV;
   readonly #topo: Topology;
   readonly #maxAttempts: number;
-  /** Signals some map cell is keyed by: only they keep an existence log. */
+  /** Collections some map builder is keyed by: only they keep an existence log. */
   readonly #keyed: Set<string>;
 
   #loaded = false;
@@ -135,10 +135,10 @@ export class TraceEngine implements Engine {
 
   constructor(opts: EngineOptions) {
     this.#kv = opts.kv;
-    this.#topo = new Topology(opts.cells);
+    this.#topo = new Topology(opts.builders);
     this.#maxAttempts = opts.maxAttempts ?? 3;
     this.#keyed = new Set(
-      opts.cells.filter((c) => c.kind !== "reduce").flatMap((c) => [...c.inputs]),
+      opts.builders.filter((c) => c.kind !== "reduce").flatMap((c) => [...c.inputs]),
     );
   }
 
@@ -156,12 +156,12 @@ export class TraceEngine implements Engine {
     this.#loaded = true;
   }
 
-  #at(signal: string): number {
-    return this.#sigAt.get(signal) ?? 0;
+  #at(collection: string): number {
+    return this.#sigAt.get(collection) ?? 0;
   }
 
-  async #readRow(signal: string, key: string): Promise<Row | null> {
-    const id = k("r", signal, key);
+  async #readRow(collection: string, key: string): Promise<Row | null> {
+    const id = k("r", collection, key);
     const cached = this.#memo?.get(id);
     if (cached !== undefined) return cached;
     const text = await this.#kv.get(id);
@@ -172,7 +172,7 @@ export class TraceEngine implements Engine {
 
   /**
    * Turn row changes into KV writes under one fresh revision: rows, the
-   * per-signal revision, and existence-log entries. Returns the cache updates
+   * per-collection revision, and existence-log entries. Returns the cache updates
    * to apply once the commit succeeded.
    */
   #changeWrites(changes: Change[], owner: string, writes: Write[]): () => void {
@@ -181,13 +181,13 @@ export class TraceEngine implements Engine {
     const touched = new Set<string>();
     const rows: [string, Row | null][] = [];
     for (const c of changes) {
-      const id = k("r", c.signal, c.key);
+      const id = k("r", c.collection, c.key);
       const row = c.json === undefined ? null : { at: rev, owner, json: c.json };
       writes.push({ key: id, value: row ? encodeRow(row) : undefined });
       rows.push([id, row]);
-      touched.add(c.signal);
-      if (c.existence && this.#keyed.has(c.signal)) {
-        writes.push({ key: k("e", c.signal, seqKey(rev), c.key), value: "" });
+      touched.add(c.collection);
+      if (c.existence && this.#keyed.has(c.collection)) {
+        writes.push({ key: k("e", c.collection, seqKey(rev), c.key), value: "" });
       }
     }
     for (const s of touched) writes.push({ key: k("s", s), value: seqKey(rev) });
@@ -199,20 +199,20 @@ export class TraceEngine implements Engine {
 
   // ------------------------------------------------------------ public API
 
-  async put(signal: string, key: string, value: Json): Promise<void> {
-    this.#topo.assertSource(signal);
+  async put(collection: string, key: string, value: Json): Promise<void> {
+    this.#topo.assertSource(collection);
     await this.#load();
     const json = canonicalJson(value);
-    const row = await this.#readRow(signal, key);
+    const row = await this.#readRow(collection, key);
     if (row?.json === json) return;
-    await this.#write({ signal, key, json, existence: row === null });
+    await this.#write({ collection, key, json, existence: row === null });
   }
 
-  async remove(signal: string, key: string): Promise<void> {
-    this.#topo.assertSource(signal);
+  async remove(collection: string, key: string): Promise<void> {
+    this.#topo.assertSource(collection);
     await this.#load();
-    if ((await this.#readRow(signal, key)) === null) return;
-    await this.#write({ signal, key, existence: true });
+    if ((await this.#readRow(collection, key)) === null) return;
+    await this.#write({ collection, key, existence: true });
   }
 
   async #write(change: Change): Promise<void> {
@@ -223,14 +223,14 @@ export class TraceEngine implements Engine {
     if (this.#running) this.#externalWrite = true;
   }
 
-  async get(signal: string, key: string): Promise<Json | undefined> {
-    const text = await this.#kv.get(k("r", signal, key));
+  async get(collection: string, key: string): Promise<Json | undefined> {
+    const text = await this.#kv.get(k("r", collection, key));
     return text === undefined ? undefined : (JSON.parse(decodeRow(text).json) as Json);
   }
 
-  async list(signal: string): Promise<{ key: string; value: Json }[]> {
+  async list(collection: string): Promise<{ key: string; value: Json }[]> {
     const out: { key: string; value: Json }[] = [];
-    for await (const [key, text] of this.#kv.scan(kp("r", signal))) {
+    for await (const [key, text] of this.#kv.scan(kp("r", collection))) {
       out.push({ key: split(key)[2] as string, value: JSON.parse(decodeRow(text).json) });
     }
     return out;
@@ -239,8 +239,8 @@ export class TraceEngine implements Engine {
   async deadLetters(): Promise<DeadLetter[]> {
     const out: DeadLetter[] = [];
     for await (const [key, json] of this.#kv.scan(kp("d"))) {
-      const [, cell, task] = split(key);
-      out.push({ cell: cell as string, key: task as string, ...JSON.parse(json) });
+      const [, builder, task] = split(key);
+      out.push({ builder: builder as string, key: task as string, ...JSON.parse(json) });
     }
     return out;
   }
@@ -261,7 +261,7 @@ export class TraceEngine implements Engine {
     this.#externalWrite = false;
     try {
       for (const id of this.#topo.order)
-        await this.#verifyCell(this.#topo.cell(id), V, stats, budget);
+        await this.#verifyCell(this.#topo.builder(id), V, stats, budget);
     } catch (error) {
       if (!(error instanceof Stop)) throw error;
       stats.pending = true;
@@ -275,9 +275,9 @@ export class TraceEngine implements Engine {
     const newV = this.#externalWrite ? rStart : this.#R;
     if (this.#externalWrite) stats.pending = true;
     const writes: Write[] = [{ key: k("m", "v"), value: seqKey(newV) }];
-    for (const signal of this.#keyed) {
-      if (this.#at(signal) <= V) continue;
-      for await (const [key] of this.#kv.scan(kp("e", signal))) {
+    for (const collection of this.#keyed) {
+      if (this.#at(collection) <= V) continue;
+      for await (const [key] of this.#kv.scan(kp("e", collection))) {
         if (Number.parseInt(split(key)[2] as string, 36) > newV) break;
         writes.push({ key });
       }
@@ -287,14 +287,19 @@ export class TraceEngine implements Engine {
     return stats;
   }
 
-  async #verifyCell(cell: CellDef, V: number, stats: RunStats, budget: () => void): Promise<void> {
-    const changed = [...cell.inputs, ...(cell.reads ?? [])].some((s) => this.#at(s) > V);
-    if (cell.kind === "reduce") {
-      const text = await this.#kv.get(k("t", cell.id, "*"));
+  async #verifyCell(
+    builder: BuilderDef,
+    V: number,
+    stats: RunStats,
+    budget: () => void,
+  ): Promise<void> {
+    const changed = [...builder.inputs, ...(builder.reads ?? [])].some((s) => this.#at(s) > V);
+    if (builder.kind === "reduce") {
+      const text = await this.#kv.get(k("t", builder.id, "*"));
       const trace = text === undefined ? undefined : (JSON.parse(text) as Trace);
       if (!trace || (changed && (await this.#stale(trace, V)))) {
         budget();
-        await this.#execute(cell, "*", trace, stats);
+        await this.#execute(builder, "*", trace, stats);
       }
       return;
     }
@@ -302,7 +307,7 @@ export class TraceEngine implements Engine {
 
     // Keys whose existence changed on an input since V: candidate births/deaths.
     const candidates = new Set<string>();
-    for (const s of cell.inputs) {
+    for (const s of builder.inputs) {
       if (this.#at(s) <= V) continue;
       const after = kp("e", s) + seqKey(V) + AFTER_SEP;
       for await (const [key] of this.#kv.scan(kp("e", s), { after })) {
@@ -310,29 +315,29 @@ export class TraceEngine implements Engine {
       }
     }
 
-    // Verify every existing trace of the cell (commits during the scan are fine).
-    for await (const [tkey, text] of this.#kv.scan(kp("t", cell.id))) {
+    // Verify every existing trace of the builder (commits during the scan are fine).
+    for await (const [tkey, text] of this.#kv.scan(kp("t", builder.id))) {
       const key = split(tkey)[2] as string;
       const trace = JSON.parse(text) as Trace;
-      if (candidates.delete(key) && !(await this.#live(cell, key))) {
+      if (candidates.delete(key) && !(await this.#live(builder, key))) {
         budget();
-        await this.#retract(cell, key, trace, stats);
+        await this.#retract(builder, key, trace, stats);
       } else if (await this.#stale(trace, V)) {
         budget();
-        await this.#execute(cell, key, trace, stats);
+        await this.#execute(builder, key, trace, stats);
       }
     }
     // Candidates without a trace that are live are new tasks.
     for (const key of [...candidates].sort()) {
-      if (!(await this.#live(cell, key))) continue;
+      if (!(await this.#live(builder, key))) continue;
       budget();
-      await this.#execute(cell, key, undefined, stats);
+      await this.#execute(builder, key, undefined, stats);
     }
   }
 
   /** A map task is live while its key exists on some input. */
-  async #live(cell: CellDef, key: string): Promise<boolean> {
-    for (const s of cell.inputs) if ((await this.#readRow(s, key)) !== null) return true;
+  async #live(builder: BuilderDef, key: string): Promise<boolean> {
+    for (const s of builder.inputs) if ((await this.#readRow(s, key)) !== null) return true;
     return false;
   }
 
@@ -354,8 +359,8 @@ export class TraceEngine implements Engine {
   // ------------------------------------------------------------ execution
 
   /** Run a task (with retries) and commit its outputs + trace atomically. */
-  async #execute(cell: CellDef, key: string, prev: Trace | undefined, stats: RunStats) {
-    const taskId = k(cell.id, key);
+  async #execute(builder: BuilderDef, key: string, prev: Trace | undefined, stats: RunStats) {
+    const taskId = k(builder.id, key);
     const seen = this.#R; // everything up to here is visible to the task
     let lastError: unknown;
     let reads: Reads = { gets: new Map(), lists: new Set() };
@@ -364,7 +369,7 @@ export class TraceEngine implements Engine {
       let changes: Change[];
       let outputs: Map<string, string[]>;
       try {
-        const emitted = await this.#invoke(cell, key, reads);
+        const emitted = await this.#invoke(builder, key, reads);
         ({ changes, outputs } = await this.#plan(taskId, prev, emitted, reads));
       } catch (error) {
         lastError = error;
@@ -395,12 +400,12 @@ export class TraceEngine implements Engine {
     stats.deadLettered++;
   }
 
-  /** Retract a dead task without calling its cell. */
-  async #retract(cell: CellDef, key: string, trace: Trace, stats: RunStats) {
-    const taskId = k(cell.id, key);
+  /** Retract a dead task without calling its builder. */
+  async #retract(builder: BuilderDef, key: string, trace: Trace, stats: RunStats) {
+    const taskId = k(builder.id, key);
     const changes: Change[] = [];
-    for (const [signal, keys] of trace.o) {
-      for (const rk of keys) changes.push({ signal, key: rk, existence: true });
+    for (const [collection, keys] of trace.o) {
+      for (const rk of keys) changes.push({ collection, key: rk, existence: true });
     }
     const writes: Write[] = [];
     const apply = this.#changeWrites(changes, taskId, writes);
@@ -422,40 +427,43 @@ export class TraceEngine implements Engine {
     return { r: seen, g, l: [...reads.lists], o: outputs };
   }
 
-  /** Call the cell with a tracking context; returns its emissions. */
-  async #invoke(cell: CellDef, key: string, reads: Reads) {
-    const readable = new Set([...cell.inputs, ...(cell.reads ?? [])]);
-    const emitted = new Map<string, { signal: string; key: string; json: string }>();
-    const check = (signal: string) => {
-      if (!readable.has(signal)) throw new Error(`Cell "${cell.id}" read undeclared "${signal}"`);
+  /** Call the builder with a tracking context; returns its emissions. */
+  async #invoke(builder: BuilderDef, key: string, reads: Reads) {
+    const readable = new Set([...builder.inputs, ...(builder.reads ?? [])]);
+    const emitted = new Map<string, { collection: string; key: string; json: string }>();
+    const check = (collection: string) => {
+      if (!readable.has(collection))
+        throw new Error(`Builder "${builder.id}" read undeclared "${collection}"`);
     };
     const ctx: TaskContext = {
       key,
-      get: async (signal, rk) => {
-        check(signal);
-        const row = await this.#readRow(signal, rk);
-        trackGet(reads, signal, rk, row !== null);
+      get: async (collection, rk) => {
+        check(collection);
+        const row = await this.#readRow(collection, rk);
+        trackGet(reads, collection, rk, row !== null);
         return row === null ? undefined : (JSON.parse(row.json) as Json);
       },
-      list: async (signal) => {
-        check(signal);
-        reads.lists.add(signal);
-        return this.list(signal);
+      list: async (collection) => {
+        check(collection);
+        reads.lists.add(collection);
+        return this.list(collection);
       },
-      emit(signal, rk, value) {
-        if (!cell.outputs.includes(signal)) {
-          throw new Error(`Cell "${cell.id}" emitted to undeclared signal "${signal}"`);
+      emit(collection, rk, value) {
+        if (!builder.outputs.includes(collection)) {
+          throw new Error(
+            `Builder "${builder.id}" emitted to undeclared collection "${collection}"`,
+          );
         }
         const json = canonicalJson(value);
-        const id = k(signal, rk);
+        const id = k(collection, rk);
         const prior = emitted.get(id);
         if (prior && prior.json !== json) {
-          throw new ConflictingEmission(`${signal}/${rk}: emitted twice with different values`);
+          throw new ConflictingEmission(`${collection}/${rk}: emitted twice with different values`);
         }
-        emitted.set(id, { signal, key: rk, json });
+        emitted.set(id, { collection, key: rk, json });
       },
     };
-    await cell.run(ctx);
+    await builder.run(ctx);
     return emitted;
   }
 
@@ -467,42 +475,47 @@ export class TraceEngine implements Engine {
   async #plan(
     taskId: string,
     prev: Trace | undefined,
-    emitted: Map<string, { signal: string; key: string; json: string }>,
+    emitted: Map<string, { collection: string; key: string; json: string }>,
     reads: Reads,
   ) {
     const changes: Change[] = [];
     const outputs = new Map<string, string[]>();
     for (const e of emitted.values()) {
-      const row = await this.#readRow(e.signal, e.key);
+      const row = await this.#readRow(e.collection, e.key);
       if (row !== null && row.owner !== taskId) {
-        trackGet(reads, e.signal, e.key, true);
+        trackGet(reads, e.collection, e.key, true);
         const [oc, ok] = split(row.owner);
-        throw new ConflictingEmission(`${e.signal}/${e.key}: already emitted by ${oc}/${ok}`);
+        throw new ConflictingEmission(`${e.collection}/${e.key}: already emitted by ${oc}/${ok}`);
       }
-      let keys = outputs.get(e.signal);
+      let keys = outputs.get(e.collection);
       if (!keys) {
         keys = [];
-        outputs.set(e.signal, keys);
+        outputs.set(e.collection, keys);
       }
       keys.push(e.key);
       if (row?.json !== e.json) {
-        changes.push({ signal: e.signal, key: e.key, json: e.json, existence: row === null });
+        changes.push({
+          collection: e.collection,
+          key: e.key,
+          json: e.json,
+          existence: row === null,
+        });
       }
     }
-    for (const [signal, keys] of prev?.o ?? []) {
+    for (const [collection, keys] of prev?.o ?? []) {
       for (const rk of keys) {
-        if (!emitted.has(k(signal, rk))) changes.push({ signal, key: rk, existence: true });
+        if (!emitted.has(k(collection, rk))) changes.push({ collection, key: rk, existence: true });
       }
     }
     return { changes, outputs };
   }
 }
 
-function trackGet(reads: Reads, signal: string, key: string, present: boolean): void {
-  let m = reads.gets.get(signal);
+function trackGet(reads: Reads, collection: string, key: string, present: boolean): void {
+  let m = reads.gets.get(collection);
   if (!m) {
     m = new Map();
-    reads.gets.set(signal, m);
+    reads.gets.set(collection, m);
   }
   if (!m.has(key)) m.set(key, present);
 }

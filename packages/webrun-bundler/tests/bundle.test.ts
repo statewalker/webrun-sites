@@ -4,8 +4,14 @@ import { MemFilesApi } from "@statewalker/webrun-files-mem";
 import type { Source } from "@statewalker/webrun-modules";
 import * as esbuild from "esbuild-wasm";
 import { describe, expect, it } from "vitest";
-import { bundle, chainPackages, nodeModulesPackages, npmPackages, transpile } from "./index.js";
-import type { SourceMap } from "./types.js";
+import {
+  bundle,
+  chainPackages,
+  nodeModulesPackages,
+  npmPackages,
+  transpile,
+} from "../src/index.js";
+import type { SourceMap } from "../src/types.js";
 
 // esbuild-wasm itself (its Node build runs the same WebAssembly as in browsers); every
 // file comes from a MemFilesApi, nothing from a disk.

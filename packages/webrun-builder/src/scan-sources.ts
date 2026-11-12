@@ -3,15 +3,15 @@ import type { BuildEngine } from "./engine.js";
 import { makeProjectIgnore } from "./project-ignore.js";
 import type { Json } from "./types.js";
 
-/** The default source signal written by `scanSources`. */
-export const SOURCES_SIGNAL = "sources";
+/** The default source collection written by `scanSources`. */
+export const SOURCES_COLLECTION = "sources";
 
 export interface ScanSourcesOptions {
   files: FilesApi;
   /** Project root, relative to `files`. Row keys are paths relative to it. */
   root: string;
-  /** Source signal to write (default `"sources"`). */
-  signal?: string;
+  /** Source collection to write (default `"sources"`). */
+  collection?: string;
   /** Extra exclusion, OR-ed with `.projectignore` at the root. */
   ignore?: (uri: string) => boolean;
   /**
@@ -28,7 +28,7 @@ export interface ScanResult {
 }
 
 /**
- * Mirror a file tree into a source signal: one row per file, keyed by its
+ * Mirror a file tree into a source collection: one row per file, keyed by its
  * project-relative path, valued by its fingerprint. Unchanged fingerprints
  * write nothing (the engine's early cut-off), so the source rows themselves are
  * the scanner's memory. Files that disappeared — or became ignored — are
@@ -41,7 +41,7 @@ export async function scanSources(
   engine: BuildEngine,
   opts: ScanSourcesOptions,
 ): Promise<ScanResult> {
-  const signal = opts.signal ?? SOURCES_SIGNAL;
+  const collection = opts.collection ?? SOURCES_COLLECTION;
   const base = opts.root.replace(/^\/+|\/+$/g, "");
   const projectIgnore = makeProjectIgnore(
     await tryReadText(opts.files, joinPath(opts.root, ".projectignore")),
@@ -64,11 +64,11 @@ export async function scanSources(
     const uri = relative(info.path, base);
     if (uri === undefined || ignored(uri)) continue;
     seen.add(uri);
-    if (await engine.put(signal, uri, await fingerprint(info, uri))) changed++;
+    if (await engine.put(collection, uri, await fingerprint(info, uri))) changed++;
   }
   let removed = 0;
-  for (const uri of await engine.keys(signal)) {
-    if (!seen.has(uri) && (await engine.remove(signal, uri))) removed++;
+  for (const uri of await engine.keys(collection)) {
+    if (!seen.has(uri) && (await engine.remove(collection, uri))) removed++;
   }
   return { seen: seen.size, changed, removed };
 }

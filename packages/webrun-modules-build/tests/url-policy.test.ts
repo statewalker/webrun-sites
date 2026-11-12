@@ -1,6 +1,6 @@
 import type { PreprocessContext } from "@statewalker/webrun-modules";
 import { describe, expect, it } from "vitest";
-import { makeExtMapPolicy } from "./url-policy.js";
+import { makeExtMapPolicy } from "../src/url-policy.js";
 
 // The policy reads only `ctx.depsPath` (through the core's `urlPath`); a partial
 // ctx is all it needs.

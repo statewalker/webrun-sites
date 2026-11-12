@@ -2,7 +2,7 @@ import { readText, writeText } from "@statewalker/webrun-files";
 import { MemFilesApi } from "@statewalker/webrun-files-mem";
 import { newDefaultTransform, type Transform } from "@statewalker/webrun-modules";
 import { describe, expect, it } from "vitest";
-import { newProjectBuild } from "./index.js";
+import { newProjectBuild } from "../src/index.js";
 
 function spyTransform(): Transform & { paths: string[] } {
   const real = newDefaultTransform();

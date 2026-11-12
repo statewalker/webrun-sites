@@ -11,7 +11,7 @@ export { compileIgnoreRules, type IgnoreRule, makeProjectIgnore } from "./projec
 export {
   type ScanResult,
   type ScanSourcesOptions,
-  SOURCES_SIGNAL,
+  SOURCES_COLLECTION,
   scanSources,
 } from "./scan-sources.js";
 export { CrashError, CrashingKV } from "./store/crashing-kv.js";
@@ -28,8 +28,8 @@ export { type SqlDriver, SqlKV } from "./store/sql-kv.js";
 export { Topology } from "./topology.js";
 export {
   type BuildEngineOptions,
+  type BuilderDef,
   type BuildStatus,
-  type CellDef,
   type Change,
   ConflictingEmission,
   type DeadLetter,

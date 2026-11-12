@@ -2,7 +2,7 @@ import { readText, writeText } from "@statewalker/webrun-files";
 import { MemFilesApi } from "@statewalker/webrun-files-mem";
 import { newDefaultTransform, type Transform } from "@statewalker/webrun-modules";
 import { describe, expect, it } from "vitest";
-import { newProjectBuild } from "./index.js";
+import { newProjectBuild } from "../src/index.js";
 
 describe("newProjectBuild — failures are retried by the next build", () => {
   it("a source that failed (e.g. a broken dependency) is retried without touching its file", async () => {

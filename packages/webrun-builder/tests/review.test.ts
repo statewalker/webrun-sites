@@ -7,11 +7,11 @@ import { writeText } from "@statewalker/webrun-files";
 import { MemFilesApi } from "@statewalker/webrun-files-mem";
 import { NodeSqlDriver } from "@statewalker/webrun-files-sqlite";
 import { describe, expect, it } from "vitest";
-import { BuildEngine, type CellDef, FilesKV, MemKV, SqlKV } from "./index.js";
+import { BuildEngine, type BuilderDef, FilesKV, MemKV, SqlKV } from "../src/index.js";
 
 describe("review: verify, reset and incremental reduce", () => {
-  it("B1: map task that list()s a signal is skipped by verify-before-execute when that signal changes", async () => {
-    const cell: CellDef = {
+  it("B1: map task that list()s a collection is skipped by verify-before-execute when that collection changes", async () => {
+    const builder: BuilderDef = {
       id: "m",
       inputs: ["docs"],
       reads: ["cfg"],
@@ -25,7 +25,7 @@ describe("review: verify, reset and incremental reduce", () => {
         );
       },
     };
-    const e = new BuildEngine({ store: new MemKV(), cells: [cell] });
+    const e = new BuildEngine({ store: new MemKV(), builders: [builder] });
     await e.put("docs", "a", "x");
     await e.put("cfg", "c1", "v1");
     await e.run();
@@ -38,7 +38,7 @@ describe("review: verify, reset and incremental reduce", () => {
   it("B2: incremental reduce loses a change landing while it runs (record not refreshed)", async () => {
     let gate: (() => void) | undefined;
     let hold: Promise<void> | undefined;
-    const sum: CellDef = {
+    const sum: BuilderDef = {
       id: "sum",
       kind: "reduce",
       incremental: true,
@@ -65,7 +65,7 @@ describe("review: verify, reset and incremental reduce", () => {
         );
       },
     };
-    const e = new BuildEngine({ store: new MemKV(), cells: [sum] });
+    const e = new BuildEngine({ store: new MemKV(), builders: [sum] });
     await e.put("n", "a", 1);
     await e.run();
     expect(await e.get("total", "t")).toBe(1);
@@ -85,7 +85,7 @@ describe("review: verify, reset and incremental reduce", () => {
 
   it("B3: invalidate(reducer) state reset (z) is lost when a put re-queues it before the run", async () => {
     let version = 1;
-    const sum: CellDef = {
+    const sum: BuilderDef = {
       id: "sum",
       kind: "reduce",
       incremental: true,
@@ -104,7 +104,7 @@ describe("review: verify, reset and incremental reduce", () => {
         ctx.emit("total", "t", s);
       },
     };
-    const e = new BuildEngine({ store: new MemKV(), cells: [sum] });
+    const e = new BuildEngine({ store: new MemKV(), builders: [sum] });
     await e.put("n", "a", 1);
     await e.put("n", "b", 1);
     await e.run();
@@ -118,7 +118,7 @@ describe("review: verify, reset and incremental reduce", () => {
 
   it("B3b: invalidate(map) then change+undo of input skips the new code", async () => {
     let version = 1;
-    const cell: CellDef = {
+    const builder: BuilderDef = {
       id: "m",
       inputs: ["docs"],
       outputs: ["out"],
@@ -126,7 +126,7 @@ describe("review: verify, reset and incremental reduce", () => {
         ctx.emit("out", ctx.key, `${await ctx.get("docs", ctx.key)}@${version}`);
       },
     };
-    const e = new BuildEngine({ store: new MemKV(), cells: [cell] });
+    const e = new BuildEngine({ store: new MemKV(), builders: [builder] });
     await e.put("docs", "a", "x");
     await e.run();
     version = 2;
@@ -138,14 +138,14 @@ describe("review: verify, reset and incremental reduce", () => {
   });
 });
 
-describe("review: races, requeue, shared engines, removed cells", () => {
+describe("review: races, requeue, shared engines, removed builders", () => {
   it("B2b: incremental reduce double-counts a change landing between the change snapshot and ctx.list (recompute path)", async () => {
     let hold: Promise<void> | undefined;
     let started!: () => void;
     const startedP = new Promise<void>((r) => {
       started = r;
     });
-    const total: CellDef = {
+    const total: BuilderDef = {
       id: "total",
       kind: "reduce",
       incremental: true,
@@ -165,7 +165,7 @@ describe("review: races, requeue, shared engines, removed cells", () => {
         ctx.emit("total", "sum", s.sum);
       },
     };
-    const e = new BuildEngine({ store: new MemKV(), cells: [total] });
+    const e = new BuildEngine({ store: new MemKV(), builders: [total] });
     await e.put("len", "a", 1);
     let release!: () => void;
     hold = new Promise((r) => {
@@ -182,7 +182,7 @@ describe("review: races, requeue, shared engines, removed cells", () => {
 
   it("B6: requeue of a dead letter after invalidate is skipped by verify (z dropped)", async () => {
     let version = 1;
-    const cell: CellDef = {
+    const builder: BuilderDef = {
       id: "m",
       inputs: ["docs"],
       outputs: ["out"],
@@ -191,7 +191,7 @@ describe("review: races, requeue, shared engines, removed cells", () => {
         ctx.emit("out", ctx.key, `${await ctx.get("docs", ctx.key)}@${version}`);
       },
     };
-    const e = new BuildEngine({ store: new MemKV(), cells: [cell] });
+    const e = new BuildEngine({ store: new MemKV(), builders: [builder] });
     await e.put("docs", "a", "x");
     await e.run();
     version = 2;
@@ -205,7 +205,7 @@ describe("review: races, requeue, shared engines, removed cells", () => {
   });
 
   it("B7: skipped task keeps a stale dead letter", async () => {
-    const cell: CellDef = {
+    const builder: BuilderDef = {
       id: "m",
       inputs: ["docs"],
       outputs: ["out"],
@@ -215,7 +215,7 @@ describe("review: races, requeue, shared engines, removed cells", () => {
         ctx.emit("out", ctx.key, String(v));
       },
     };
-    const e = new BuildEngine({ store: new MemKV(), cells: [cell] });
+    const e = new BuildEngine({ store: new MemKV(), builders: [builder] });
     await e.put("docs", "a", "x");
     await e.run();
     await e.put("docs", "a", "bad");
@@ -232,7 +232,7 @@ describe("review: races, requeue, shared engines, removed cells", () => {
     const hold = new Promise<void>((r) => {
       gate = r;
     });
-    const mk = (slow: boolean): CellDef => ({
+    const mk = (slow: boolean): BuilderDef => ({
       id: "m",
       inputs: ["docs"],
       outputs: ["out"],
@@ -242,8 +242,8 @@ describe("review: races, requeue, shared engines, removed cells", () => {
         ctx.emit("out", ctx.key, `${v}`);
       },
     });
-    const A = new BuildEngine({ store, cells: [mk(true)], shared: true, owner: "A" });
-    const B = new BuildEngine({ store, cells: [mk(false)], shared: true, owner: "B" });
+    const A = new BuildEngine({ store, builders: [mk(true)], shared: true, owner: "A" });
+    const B = new BuildEngine({ store, builders: [mk(false)], shared: true, owner: "B" });
     await A.put("docs", "a", "v1");
     const ra = A.run();
     await new Promise((r) => setTimeout(r, 10)); // A leased and is executing (read v1)
@@ -264,7 +264,7 @@ describe("review: races, requeue, shared engines, removed cells", () => {
       gate = r;
     });
     let slow = true;
-    const cell: CellDef = {
+    const builder: BuilderDef = {
       id: "m",
       inputs: ["docs"],
       outputs: ["out"],
@@ -279,7 +279,7 @@ describe("review: races, requeue, shared engines, removed cells", () => {
     };
     const A = new BuildEngine({
       store,
-      cells: [cell],
+      builders: [builder],
       shared: true,
       owner: "A",
       leaseMs: 100,
@@ -287,7 +287,7 @@ describe("review: races, requeue, shared engines, removed cells", () => {
     });
     const B = new BuildEngine({
       store,
-      cells: [cell],
+      builders: [builder],
       shared: true,
       owner: "B",
       leaseMs: 100,
@@ -304,9 +304,9 @@ describe("review: races, requeue, shared engines, removed cells", () => {
     expect(await A.get("out", "a")).toBe("v2");
   });
 
-  it("B5: removing a cell that has queued work wedges run() forever", async () => {
+  it("B5: removing a builder that has queued work wedges run() forever", async () => {
     const store = new MemKV();
-    const a: CellDef = {
+    const a: BuilderDef = {
       id: "a",
       inputs: ["docs"],
       outputs: ["A"],
@@ -314,7 +314,7 @@ describe("review: races, requeue, shared engines, removed cells", () => {
         ctx.emit("A", ctx.key, 1);
       },
     };
-    const old: CellDef = {
+    const old: BuilderDef = {
       id: "old",
       inputs: ["docs"],
       outputs: ["O"],
@@ -322,10 +322,10 @@ describe("review: races, requeue, shared engines, removed cells", () => {
         ctx.emit("O", ctx.key, 1);
       },
     };
-    const e1 = new BuildEngine({ store, cells: [a, old] });
+    const e1 = new BuildEngine({ store, builders: [a, old] });
     await e1.put("docs", "k", "x"); // queues a/k and old/k
     // new deploy drops `old`
-    const e2 = new BuildEngine({ store, cells: [a] });
+    const e2 = new BuildEngine({ store, builders: [a] });
     let err: unknown;
     try {
       await e2.run();
@@ -340,15 +340,15 @@ describe("review: races, requeue, shared engines, removed cells", () => {
     expect(err).toBeUndefined();
   });
 
-  it("queue rows written under an old cell order are still run upstream-first after a reorder", async () => {
+  it("queue rows written under an old builder order are still run upstream-first after a reorder", async () => {
     const store = new MemKV();
-    const a: CellDef = {
+    const a: BuilderDef = {
       id: "a",
       inputs: ["docs"],
       outputs: ["A"],
       run: (ctx) => ctx.emit("A", ctx.key, 1),
     };
-    const b: CellDef = {
+    const b: BuilderDef = {
       id: "b",
       inputs: ["A"],
       outputs: ["B"],
@@ -356,23 +356,23 @@ describe("review: races, requeue, shared engines, removed cells", () => {
         ctx.emit("B", ctx.key, Number(await ctx.get("A", ctx.key)) + 1);
       },
     };
-    const extra: CellDef = {
+    const extra: BuilderDef = {
       id: "extra",
       inputs: ["docs"],
       outputs: ["X"],
       run: (ctx) => ctx.emit("X", ctx.key, 0),
     };
-    const e1 = new BuildEngine({ store, cells: [a, b] });
+    const e1 = new BuildEngine({ store, builders: [a, b] });
     await e1.put("docs", "k", "x"); // queued under a's old rank
     const ran: string[] = [];
     const tracked = [extra, a, b].map((c) => ({
       ...c,
-      run(ctx: Parameters<CellDef["run"]>[0]) {
+      run(ctx: Parameters<BuilderDef["run"]>[0]) {
         ran.push(c.id);
         return c.run(ctx);
       },
     }));
-    const e2 = new BuildEngine({ store, cells: tracked }); // ranks shift
+    const e2 = new BuildEngine({ store, builders: tracked }); // ranks shift
     await e2.put("docs", "k", "y"); // re-queues a/k under its new rank
     await e2.run();
     expect(ran.filter((id) => id === "a")).toEqual(["a"]); // not twice (no duplicate rows)
@@ -380,8 +380,8 @@ describe("review: races, requeue, shared engines, removed cells", () => {
     expect(await e2.status()).toEqual({ queued: {}, deadLetters: 0 });
   });
 
-  it("rejects incremental reduce cells on a shared store", () => {
-    const r: CellDef = {
+  it("rejects incremental reduce builders on a shared store", () => {
+    const r: BuilderDef = {
       id: "r",
       kind: "reduce",
       incremental: true,
@@ -389,13 +389,13 @@ describe("review: races, requeue, shared engines, removed cells", () => {
       outputs: ["o"],
       run() {},
     };
-    expect(() => new BuildEngine({ store: new MemKV(), cells: [r], shared: true })).toThrow(
-      /incremental reduce cells are not supported with shared: true/,
+    expect(() => new BuildEngine({ store: new MemKV(), builders: [r], shared: true })).toThrow(
+      /incremental reduce builders are not supported with shared: true/,
     );
   });
 
   it("put/remove reject keys with reserved characters", async () => {
-    const e = new BuildEngine({ store: new MemKV(), cells: [] });
+    const e = new BuildEngine({ store: new MemKV(), builders: [] });
     await expect(e.put("docs", "a\u0001b", 1)).rejects.toThrow(/reserved control character/);
   });
 });

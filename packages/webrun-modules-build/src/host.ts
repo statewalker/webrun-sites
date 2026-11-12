@@ -2,7 +2,7 @@ import type { FilesApi } from "@statewalker/webrun-files";
 import type { PreprocessContext } from "@statewalker/webrun-modules";
 
 /**
- * What the build cells work with: the two FilesApis (raw project sources vs.
+ * What the build builders work with: the two FilesApis (raw project sources vs.
  * the emitted-artifact cache) and the shared `PreprocessContext` they drive the
  * module core through.
  */

@@ -2,7 +2,7 @@
  * Key-tuple encoding for the ordered store. Parts are joined with U+0001, which
  * sorts below every printable character, so a prefix of parts is a prefix of
  * the key and tuples sort part by part. (Not U+0000: SQLite truncates TEXT at
- * NUL.) Signal names, cell ids and row keys must not contain U+0000–U+0002.
+ * NUL.) Collection names, builder ids and row keys must not contain U+0000–U+0002.
  */
 export const SEP = "\u0001";
 

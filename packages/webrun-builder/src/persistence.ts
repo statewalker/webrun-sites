@@ -7,7 +7,7 @@ import type { BuildEngineOptions } from "./types.js";
 
 /**
  * Where a build engine keeps its state. Pick per deployment; the engine and
- * the cells do not change.
+ * the builders do not change.
  *
  * - `memory` — nothing survives the process (tests, one-shot builds).
  * - `files`  — any `FilesApi` (Node, browser storage, memory): `snapshot.json`

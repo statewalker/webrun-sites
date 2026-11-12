@@ -12,10 +12,10 @@ import { NodeSqlDriver } from "@statewalker/webrun-files-sqlite";
 import { double, len, rng, split, upper } from "../src/core/fixtures.js";
 import { MemKV } from "../src/core/kv.js";
 import { SqlKV } from "../src/core/sql-kv.js";
-import type { CellDef } from "../src/core/types.js";
+import type { BuilderDef } from "../src/core/types.js";
 import { QueueEngine } from "../src/prototypes/queue.js";
 
-const CELLS: CellDef[] = [split, upper, len, double];
+const BUILDERS: BuilderDef[] = [split, upper, len, double];
 const WORDS = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu".split(" ");
 
 interface Target {
@@ -27,9 +27,9 @@ interface Target {
 
 function targets(): Target[] {
   const sqlite = () => new NodeSqlDriver(new DatabaseSync(":memory:"));
-  const bSql = new QueueEngine({ kv: new SqlKV(sqlite()), cells: CELLS });
-  const bMem = new QueueEngine({ kv: new MemKV(), cells: CELLS });
-  const rSql = new BuildEngine({ store: new RealSqlKV(sqlite()), cells: CELLS });
+  const bSql = new QueueEngine({ kv: new SqlKV(sqlite()), builders: BUILDERS });
+  const bMem = new QueueEngine({ kv: new MemKV(), builders: BUILDERS });
+  const rSql = new BuildEngine({ store: new RealSqlKV(sqlite()), builders: BUILDERS });
   return [
     {
       label: "webrun-builder (SQLite)",

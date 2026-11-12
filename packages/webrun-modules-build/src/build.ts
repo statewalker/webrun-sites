@@ -20,7 +20,7 @@ import {
   type UrlPolicy,
 } from "@statewalker/webrun-modules";
 import { newTailwindTransform, tailwindCacheKey } from "@statewalker/webrun-tailwind";
-import { SERVED_SIGNAL, webrunCells } from "./cells.js";
+import { SERVED_COLLECTION, webrunBuilders } from "./builders.js";
 import type { WebrunBuildHost } from "./host.js";
 import { makeExtMapPolicy } from "./url-policy.js";
 
@@ -63,8 +63,8 @@ function hashSource(source: string): string {
  * Assemble the batch module builder: the shared `PreprocessContext` (ext-map policy,
  * explicit `HostRegistry`, in-flight dedupe, target-derived globals) + a
  * `BuildEngine` whose state lives in `project/.project/state` (a `FilesKV`) +
- * the preprocess cell. Each `build()` scans the project into the `sources`
- * signal and runs the engine; emitted artifacts go to `cache`.
+ * the preprocess builder. Each `build()` scans the project into the `sources`
+ * collection and runs the engine; emitted artifacts go to `cache`.
  */
 export function newProjectBuild(opts: ProjectBuildOptions): ProjectBuild {
   const { project, cache } = opts;
@@ -107,7 +107,7 @@ export function newProjectBuild(opts: ProjectBuildOptions): ProjectBuild {
   // (entry + interior + shared): reuse the emitted artifact when the source is
   // byte-identical to the hash sidecar recorded beside it and the artifact still
   // exists; otherwise record the fresh hash and let the transform re-run. This is
-  // the sole gate now — the per-entry cell gate is folded in here so all nodes are
+  // the sole gate now — the per-entry builder gate is folded in here so all nodes are
   // gated uniformly (a diamond's shared node transforms once, not once per path).
   ctx.skipTransform = async (id, source) => {
     const path = ctx.policy.emittedPath(id);
@@ -135,12 +135,12 @@ export function newProjectBuild(opts: ProjectBuildOptions): ProjectBuild {
     async build() {
       engine ??= new BuildEngine({
         store: await FilesKV.open(project, "/.project/state"),
-        cells: webrunCells(host),
+        builders: webrunBuilders(host),
       });
       await scanSources(engine, { files: project, root: "/" });
       // Retry what failed last time: a source's closure reads files the engine
       // does not track (its dependencies), so fixing one would not re-queue it.
-      for (const d of await engine.deadLetters()) await engine.requeue(d.cell, d.key);
+      for (const d of await engine.deadLetters()) await engine.requeue(d.builder, d.key);
       await engine.run();
       const failed = await engine.deadLetters();
       if (failed.length > 0) {
@@ -149,7 +149,7 @@ export function newProjectBuild(opts: ProjectBuildOptions): ProjectBuild {
           `newProjectBuild: ${failed.length} source(s) failed to build; first: ${first?.key}: ${first?.error}`,
         );
       }
-      return { served: await engine.keys(SERVED_SIGNAL) };
+      return { served: await engine.keys(SERVED_COLLECTION) };
     },
   };
 }

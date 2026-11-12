@@ -1,13 +1,13 @@
 /**
- * Cell fixtures shared by the conformance suite and the benchmark. Every cell
+ * Builder fixtures shared by the conformance suite and the benchmark. Every builder
  * is a pure function of what it reads; executions are recorded in `log`.
  */
-import type { CellDef, Engine, Json } from "./types.js";
+import type { BuilderDef, Engine, Json } from "./types.js";
 
 export interface Recorder {
-  /** `cell/key` of every execution, in order. */
+  /** `builder/key` of every execution, in order. */
   log: string[];
-  count(cell: string, key?: string): number;
+  count(builder: string, key?: string): number;
   reset(): void;
 }
 
@@ -15,9 +15,9 @@ export function recorder(): Recorder {
   const log: string[] = [];
   return {
     log,
-    count(cell, key) {
-      const exact = key === undefined ? undefined : `${cell}/${key}`;
-      return log.filter((e) => (exact ? e === exact : e.startsWith(`${cell}/`))).length;
+    count(builder, key) {
+      const exact = key === undefined ? undefined : `${builder}/${key}`;
+      return log.filter((e) => (exact ? e === exact : e.startsWith(`${builder}/`))).length;
     },
     reset() {
       log.length = 0;
@@ -25,9 +25,9 @@ export function recorder(): Recorder {
   };
 }
 
-/** Wrap cells so each execution is appended to `rec.log`. */
-export function recorded(rec: Recorder, cells: CellDef[]): CellDef[] {
-  return cells.map((c) => ({
+/** Wrap builders so each execution is appended to `rec.log`. */
+export function recorded(rec: Recorder, builders: BuilderDef[]): BuilderDef[] {
+  return builders.map((c) => ({
     ...c,
     run(ctx) {
       rec.log.push(`${c.id}/${ctx.key}`);
@@ -37,7 +37,7 @@ export function recorded(rec: Recorder, cells: CellDef[]): CellDef[] {
 }
 
 /** docs/<k> = "w1 w2" → chunks/<k>#<n> = "wn" */
-export const split: CellDef = {
+export const split: BuilderDef = {
   id: "split",
   inputs: ["docs"],
   outputs: ["chunks"],
@@ -52,7 +52,7 @@ export const split: CellDef = {
 };
 
 /** chunks/<k> → upper/<k> */
-export const upper: CellDef = {
+export const upper: BuilderDef = {
   id: "upper",
   inputs: ["chunks"],
   outputs: ["upper"],
@@ -62,7 +62,7 @@ export const upper: CellDef = {
 };
 
 /** docs/<k> → len/<k> = text length (an early cut-off point). */
-export const len: CellDef = {
+export const len: BuilderDef = {
   id: "len",
   inputs: ["docs"],
   outputs: ["len"],
@@ -72,7 +72,7 @@ export const len: CellDef = {
 };
 
 /** len/<k> → len2/<k> = len * 2 (downstream of the cut-off point). */
-export const double: CellDef = {
+export const double: BuilderDef = {
   id: "double",
   inputs: ["len"],
   outputs: ["len2"],
@@ -82,7 +82,7 @@ export const double: CellDef = {
 };
 
 /** reduce over len: stats/total = { count, sum } */
-export const stats: CellDef = {
+export const stats: BuilderDef = {
   id: "stats",
   kind: "reduce",
   inputs: ["len"],
@@ -97,7 +97,7 @@ export const stats: CellDef = {
 };
 
 /** Diamond: docs → left (l), right (r) → join (j). */
-export const left: CellDef = {
+export const left: BuilderDef = {
   id: "left",
   inputs: ["docs"],
   outputs: ["l"],
@@ -105,7 +105,7 @@ export const left: CellDef = {
     ctx.emit("l", ctx.key, `L(${await ctx.get("docs", ctx.key)})`);
   },
 };
-export const right: CellDef = {
+export const right: BuilderDef = {
   id: "right",
   inputs: ["docs"],
   outputs: ["r"],
@@ -113,7 +113,7 @@ export const right: CellDef = {
     ctx.emit("r", ctx.key, `R(${await ctx.get("docs", ctx.key)})`);
   },
 };
-export const join: CellDef = {
+export const join: BuilderDef = {
   id: "join",
   inputs: ["l", "r"],
   outputs: ["j"],
@@ -131,7 +131,7 @@ export interface Mod {
   code: string;
   imports: string[];
 }
-export const compile: CellDef = {
+export const compile: BuilderDef = {
   id: "compile",
   inputs: ["mods"],
   outputs: ["compiled"],
@@ -147,7 +147,7 @@ export const compile: CellDef = {
 };
 
 /** compiled/<k> → bundle/<k>: a second stage reading the first stage's outputs dynamically. */
-export const bundle: CellDef = {
+export const bundle: BuilderDef = {
   id: "bundle",
   inputs: ["compiled"],
   reads: ["mods"],
@@ -163,13 +163,13 @@ export const bundle: CellDef = {
   },
 };
 
-/** Snapshot of the given signals, for comparing engines. */
+/** Snapshot of the given collections, for comparing engines. */
 export async function snapshot(
   engine: Engine,
-  signals: readonly string[],
+  collections: readonly string[],
 ): Promise<Record<string, Record<string, Json>>> {
   const out: Record<string, Record<string, Json>> = {};
-  for (const s of signals) {
+  for (const s of collections) {
     out[s] = Object.fromEntries((await engine.list(s)).map((r) => [r.key, r.value]));
   }
   return out;

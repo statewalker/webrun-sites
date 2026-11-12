@@ -1,11 +1,11 @@
-import { type CellDef, SOURCES_SIGNAL } from "@statewalker/webrun-builder";
+import { type BuilderDef, SOURCES_COLLECTION } from "@statewalker/webrun-builder";
 import { urlPath, walkFrom } from "@statewalker/webrun-modules";
 import { emitBuildForms, isAsset } from "./emit-forms.js";
 import type { WebrunBuildHost } from "./host.js";
 
-export const PREPROCESS_CELL = "Preprocess";
-/** Signal of emitted entry pointers: key = emitted path, value = source uri. */
-export const SERVED_SIGNAL = "served";
+export const PREPROCESS_BUILDER = "Preprocess";
+/** Collection of emitted entry pointers: key = emitted path, value = source uri. */
+export const SERVED_COLLECTION = "served";
 
 /** Sources the transform builds as entries: JS/TS modules, CSS and JSON. */
 const ENTRY = /\.(?:(?:m|c)?[jt]sx?|css|json)$/;
@@ -17,7 +17,7 @@ function toProjectId(uri: string): string {
 }
 
 /**
- * The batch build's cells over the `webrun-builder` engine. One map cell per
+ * The batch build's builders over the `webrun-builder` engine. One map builder per
  * source file:
  *
  *   sources (scanned) → [Preprocess] → served
@@ -30,12 +30,12 @@ function toProjectId(uri: string): string {
  * - `dispose` runs when a source disappears (or becomes ignored): it prunes the
  *   emitted artifact and its sidecars. The engine retracts the `served` row.
  */
-export function webrunCells(host: WebrunBuildHost): CellDef[] {
+export function webrunBuilders(host: WebrunBuildHost): BuilderDef[] {
   return [
     {
-      id: PREPROCESS_CELL,
-      inputs: [SOURCES_SIGNAL],
-      outputs: [SERVED_SIGNAL],
+      id: PREPROCESS_BUILDER,
+      inputs: [SOURCES_COLLECTION],
+      outputs: [SERVED_COLLECTION],
       async run(ctx) {
         if (!ENTRY.test(ctx.key)) return;
         const id = toProjectId(ctx.key);
@@ -50,7 +50,7 @@ export function webrunCells(host: WebrunBuildHost): CellDef[] {
           ids.filter((x) => x.endsWith(".json") || isAsset(x) || host.emitted.has(x)),
           host.ctx,
         );
-        ctx.emit(SERVED_SIGNAL, host.ctx.policy.emittedPath(id), ctx.key);
+        ctx.emit(SERVED_COLLECTION, host.ctx.policy.emittedPath(id), ctx.key);
       },
       async dispose(key) {
         const id = toProjectId(key);
