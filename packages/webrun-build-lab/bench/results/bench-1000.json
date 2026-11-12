@@ -1,0 +1,223 @@
+{
+  "n": 1000,
+  "rows": [
+    {
+      "engine": "P0 naive",
+      "scenario": "cold build",
+      "executed": 9001,
+      "ms": 127.400272,
+      "gets": 2001,
+      "scans": 3,
+      "rowsScanned": 2000,
+      "commits": 2001,
+      "rowsWritten": 25002,
+      "rowsDeleted": 1,
+      "bytesWritten": 943522
+    },
+    {
+      "engine": "P0 naive",
+      "scenario": "no-op rebuild",
+      "executed": 0,
+      "ms": 0.09918399999997973,
+      "gets": 1,
+      "scans": 0,
+      "rowsScanned": 0,
+      "commits": 0,
+      "rowsWritten": 0,
+      "rowsDeleted": 0,
+      "bytesWritten": 0
+    },
+    {
+      "engine": "P0 naive",
+      "scenario": "edit 1 doc (1 word)",
+      "executed": 9001,
+      "ms": 120.07103699999999,
+      "gets": 2,
+      "scans": 3,
+      "rowsScanned": 23002,
+      "commits": 2,
+      "rowsWritten": 9008,
+      "rowsDeleted": 1,
+      "bytesWritten": 427193
+    },
+    {
+      "engine": "P0 naive",
+      "scenario": "edit 1 doc (cut-off)",
+      "executed": 9001,
+      "ms": 136.98540899999995,
+      "gets": 2,
+      "scans": 3,
+      "rowsScanned": 23002,
+      "commits": 2,
+      "rowsWritten": 9005,
+      "rowsDeleted": 1,
+      "bytesWritten": 427120
+    },
+    {
+      "engine": "P0 naive",
+      "scenario": "edit 1% docs",
+      "executed": 9001,
+      "ms": 133.08757500000002,
+      "gets": 11,
+      "scans": 3,
+      "rowsScanned": 23002,
+      "commits": 11,
+      "rowsWritten": 9122,
+      "rowsDeleted": 1,
+      "bytesWritten": 429868
+    },
+    {
+      "engine": "P0 naive",
+      "scenario": "delete 1 doc",
+      "executed": 8994,
+      "ms": 129.26006499999994,
+      "gets": 2,
+      "scans": 3,
+      "rowsScanned": 23001,
+      "commits": 2,
+      "rowsWritten": 8996,
+      "rowsDeleted": 19,
+      "bytesWritten": 426729
+    },
+    {
+      "engine": "P0 naive",
+      "scenario": "edit leaf module",
+      "executed": 8994,
+      "ms": 85.18796300000008,
+      "gets": 2,
+      "scans": 3,
+      "rowsScanned": 22984,
+      "commits": 2,
+      "rowsWritten": 9002,
+      "rowsDeleted": 1,
+      "bytesWritten": 427271
+    },
+    {
+      "engine": "P0 naive",
+      "scenario": "edit hub module",
+      "executed": 8994,
+      "ms": 89.59319999999991,
+      "gets": 2,
+      "scans": 3,
+      "rowsScanned": 22984,
+      "commits": 2,
+      "rowsWritten": 9163,
+      "rowsDeleted": 1,
+      "bytesWritten": 442775
+    },
+    {
+      "engine": "B queue",
+      "scenario": "cold build",
+      "executed": 9001,
+      "ms": 866.1341580000003,
+      "gets": 75968,
+      "scans": 28148,
+      "rowsScanned": 10007,
+      "commits": 11002,
+      "rowsWritten": 37963,
+      "rowsDeleted": 9001,
+      "bytesWritten": 2072392
+    },
+    {
+      "engine": "B queue",
+      "scenario": "no-op rebuild",
+      "executed": 0,
+      "ms": 0.17262200000004668,
+      "gets": 1,
+      "scans": 1,
+      "rowsScanned": 0,
+      "commits": 0,
+      "rowsWritten": 0,
+      "rowsDeleted": 0,
+      "bytesWritten": 0
+    },
+    {
+      "engine": "B queue",
+      "scenario": "edit 1 doc (1 word)",
+      "executed": 5,
+      "ms": 1.9690800000003037,
+      "gets": 41,
+      "scans": 19,
+      "rowsScanned": 1009,
+      "commits": 6,
+      "rowsWritten": 11,
+      "rowsDeleted": 5,
+      "bytesWritten": 492
+    },
+    {
+      "engine": "B queue",
+      "scenario": "edit 1 doc (cut-off)",
+      "executed": 3,
+      "ms": 0.439249000000018,
+      "gets": 29,
+      "scans": 10,
+      "rowsScanned": 5,
+      "commits": 4,
+      "rowsWritten": 6,
+      "rowsDeleted": 3,
+      "bytesWritten": 279
+    },
+    {
+      "engine": "B queue",
+      "scenario": "edit 1% docs",
+      "executed": 71,
+      "ms": 9.693055999999615,
+      "gets": 566,
+      "scans": 229,
+      "rowsScanned": 1075,
+      "commits": 81,
+      "rowsWritten": 191,
+      "rowsDeleted": 71,
+      "bytesWritten": 8657
+    },
+    {
+      "engine": "B queue",
+      "scenario": "delete 1 doc",
+      "executed": 8,
+      "ms": 2.86343799999986,
+      "gets": 45,
+      "scans": 31,
+      "rowsScanned": 1011,
+      "commits": 9,
+      "rowsWritten": 9,
+      "rowsDeleted": 26,
+      "bytesWritten": 487
+    },
+    {
+      "engine": "B queue",
+      "scenario": "edit leaf module",
+      "executed": 6,
+      "ms": 0.9582339999997203,
+      "gets": 59,
+      "scans": 17,
+      "rowsScanned": 12,
+      "commits": 7,
+      "rowsWritten": 16,
+      "rowsDeleted": 6,
+      "bytesWritten": 1181
+    },
+    {
+      "engine": "B queue",
+      "scenario": "edit hub module",
+      "executed": 167,
+      "ms": 19.035173000000214,
+      "gets": 1611,
+      "scans": 340,
+      "rowsScanned": 337,
+      "commits": 168,
+      "rowsWritten": 395,
+      "rowsDeleted": 167,
+      "bytesWritten": 31416
+    }
+  ],
+  "sizes": {
+    "P0 naive": {
+      "rows": 22984,
+      "bytes": 926796
+    },
+    "B queue": {
+      "rows": 27944,
+      "bytes": 1528445
+    }
+  }
+}
