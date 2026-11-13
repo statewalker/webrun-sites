@@ -32,6 +32,9 @@ suite and benchmarked in [`packages/webrun-build-lab`](../webrun-build-lab). The
 queue with a reverse-dependency index had the lowest incremental cost and the smallest state; it
 is this engine.
 
+How it works, with diagrams — the store, how a change propagates, early cut-off, retraction,
+failures and running in steps: [docs/how-it-works.md](docs/how-it-works.md).
+
 ## How to use
 
 ### Install
