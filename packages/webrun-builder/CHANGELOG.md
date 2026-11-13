@@ -1,5 +1,11 @@
 # @statewalker/webrun-builder
 
+## 0.4.1
+
+### Patch Changes
+
+- 9185f70: Docs: `docs/how-it-works.md` explains the engine with diagrams (the store, change propagation, early cut-off, retraction, failures, running in steps) and ships with the package.
+
 ## 0.4.0
 
 ### Minor Changes
