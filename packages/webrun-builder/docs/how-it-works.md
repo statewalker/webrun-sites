@@ -23,7 +23,7 @@ this is the mental model behind it.
 A **collection** is a named set of rows; each row is a key and a JSON value. A **source**
 collection is written from outside the engine, for example by `scanSources`, which mirrors a folder:
 one row per file, keyed by its path, valued by `{ mtime, size }`. Every other collection is written
-by exactly one **builder**.
+by **builders**, and each of its rows has exactly one producing task.
 
 A builder is a function the engine runs per **task**:
 
@@ -85,7 +85,7 @@ any point resumes where it stopped.
 
 | Prefix | Record | Purpose |
 |---|---|---|
-| `r/collection/key` | owner + JSON value | The rows. The owner is the task that emitted the row. |
+| `r/collection/key` | owner + JSON value | The rows. The owner is the task that emitted the row (empty for a source row). |
 | `q/rank/builder/task` | queue row (attempts, lease) | Tasks to run. `rank` is the builder's topological position, so a prefix scan returns the most upstream work first. |
 | `f/builder/task` | trace | What the task read (`r`), listed (`l`) and emitted (`o`); fingerprints of what it read (`i`, `rh`); incremental state (`s`). |
 | `x/collection/key/builder/task` | reverse index | "Who read this row?" A changed row queues exactly these tasks. |
@@ -93,7 +93,8 @@ any point resumes where it stopped.
 | `c/builder/collection/key` | change record | For incremental reduces: the value a row had at the task's last run. |
 | `d/builder/task` | dead letter | A task that failed `maxAttempts` times, with its error. |
 
-Key parts are joined with U+0001 (SQLite truncates strings at a NUL character).
+Key parts are joined with U+0001, which sorts below every printable character, so a prefix of parts
+is a prefix of the key. (Not U+0000: SQLite truncates text at NUL.)
 
 ## 3. What happens when a file changes
 
@@ -105,11 +106,11 @@ atomically.
 flowchart TD
   put["put(sources, a.md)"] --> same{value changed?}
   same -- no --> nothing["nothing happens"]
-  same -- yes --> mark["find readers in x/ and xl/<br/>+ map tasks keyed a.md"]
+  same -- yes --> mark["find readers in x/ and xl/<br/>+ map tasks keyed a.md, reduce tasks over sources"]
   mark --> queue["write queue rows q/rank/builder/task"]
   queue --> claim["run(): claim a batch of the<br/>most upstream builder"]
-  claim --> verify{"verify: does everything the task<br/>read last time hash the same?"}
-  verify -- yes --> skip["skip: dequeue, no run, no writes"]
+  claim --> verify{"map task: does everything it<br/>read last time hash the same?"}
+  verify -- yes --> skip["skip: dequeue, no run, no output writes"]
   verify -- no --> exec["execute run(ctx):<br/>record reads and emits"]
   exec --> diff["diff outputs with stored rows<br/>(canonical JSON)"]
   diff --> commit["commit the batch atomically:<br/>rows, traces, indexes, dequeue"]
@@ -124,9 +125,11 @@ flowchart TD
 2. **Order.** Queue keys start with the builder's topological rank, so the engine always claims the
    most upstream dirty builder first. A downstream task never runs on half-updated inputs
    (the build is *glitch-free*), and a task with several changed inputs runs once.
-3. **Verify before execute.** A task's trace holds a fingerprint of every row it read. If they all
-   hash the same now, the task is dequeued without running. This makes `invalidate`, touched files
-   and spurious wake-ups cheap.
+3. **Verify before execute.** A map task's trace holds a fingerprint of every row it read. If they
+   all hash the same now, the task is dequeued without running. This makes a change undone before
+   the run (A → B → A) and spurious re-queues cheap. It does not apply to tasks that listed a
+   collection, to reduce builders, or to tasks after `invalidate` / `requeue`, which drop the
+   fingerprints so the task runs once more.
 4. **Execute and diff.** The task runs; the rows it emits are compared with the stored ones using
    canonical JSON. Rows it no longer emits are retracted.
 5. **Commit and cascade.** Rows, the trace, index entries and the dequeue go into one atomic commit
@@ -299,7 +302,8 @@ flowchart LR
   run --> record["record the epoch:<br/>builders up to date"]
 ```
 
-- State persists under the project's `.project/state/build`.
+- State persists by default under the project's `.project/state/build` (`configurePersistence`
+  picks another store).
 - A builder registered after the files were scanned, or with a new `version`, has all its tasks
   queued before the next run, so it covers every existing file.
 - `run({ retryFailed: false, failOnError: false })` leaves an expensive failing step alone until its
