@@ -122,6 +122,7 @@ new BuildEngine({ store, builders, maxAttempts?, batchSize?, concurrency?, share
 | `put(collection, key, value)` / `remove(collection, key)` | write a source collection (one no builder outputs); resolve `true` if it changed |
 | `get` / `list` / `keys` | read any collection |
 | `run({ maxTasks?, signal?, onProgress? })` | execute queued tasks, most upstream first, until the queue is empty (or interrupted: `pending: true`) |
+| `steps({ maxTasks?, signal?, onProgress? })` | `run()` one committed batch at a time: an async generator that yields each batch's progress and returns the run's stats |
 | `status()` | queued tasks per builder, dead-letter count |
 | `deadLetters()` / `requeue(builder, key)` | inspect parked tasks and put one back |
 | `invalidate(builder)` | queue every task of a builder (its code changed); downstream re-runs only where outputs change |
@@ -129,6 +130,30 @@ new BuildEngine({ store, builders, maxAttempts?, batchSize?, concurrency?, share
 `batchSize` (default 64) is how many tasks of one builder commit per store transaction — a crash loses
 at most one batch. `concurrency` (default 1) runs a batch's tasks concurrently; they are
 independent because a builder never reads its own outputs.
+
+### Run in steps, yielding control between batches
+
+`steps()` is `run()` as an async generator. It yields one `RunProgress` per committed batch
+(`{ builder, tasks, executed, skipped, failed, deadLettered, released }`) and returns the run's
+`RunStats`. The engine waits at every `yield`: the batch is committed and no claim is held, so the
+caller can pause as long as it likes, or stop. `break` (or `return()`, or an exception in the loop)
+ends the run cleanly, and the next `run()` or `steps()` continues from the queue.
+
+```ts
+let tasks = 0;
+for await (const p of engine.steps({ signal })) {
+  tasks += p.tasks;
+  if (tasks >= 100) {
+    tasks = 0;
+    await new Promise((r) => setTimeout(r, 100)); // let the UI breathe; or `break`
+  }
+}
+```
+
+One message per batch: `batchSize: 1` gives one per task, at the cost of one commit per task.
+Like `run()`, only one at a time: a suspended generator holds the engine until it finishes or is
+returned, so a second `run()` meanwhile is refused — do not drop a generator half-way. `run()` is
+`steps()` drained.
 
 ### Persistence is configuration
 
