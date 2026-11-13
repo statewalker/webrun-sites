@@ -295,16 +295,32 @@ export class BuildEngine {
 
   /** Execute queued tasks, most upstream first, until the queue is empty. */
   async run(opts?: RunOptions): Promise<RunStats> {
+    const steps = this.steps(opts);
+    for (;;) {
+      const next = await steps.next();
+      if (next.done) return next.value;
+    }
+  }
+
+  /**
+   * `run()` one committed batch at a time: yields each batch's progress and returns the
+   * run's stats. The engine waits at every `yield`; nothing is in flight then (the batch is
+   * committed, no claim is held), so the caller may pause for as long as it likes, or stop
+   * — `break` / `return()` ends the run cleanly and the next run continues from the queue.
+   * Like `run()`, one at a time: a suspended generator keeps the engine until it is finished
+   * or returned, so do not drop one half-way.
+   */
+  async *steps(opts?: RunOptions): AsyncGenerator<RunProgress, RunStats, void> {
     if (this.#running) throw new Error("BuildEngine.run is already in progress");
     this.#running = true;
     try {
-      return await this.#run(opts);
+      return yield* this.#steps(opts);
     } finally {
       this.#running = false;
     }
   }
 
-  async #run(opts?: RunOptions): Promise<RunStats> {
+  async *#steps(opts?: RunOptions): AsyncGenerator<RunProgress, RunStats, void> {
     const stats: RunStats = { executed: 0, skipped: 0, failed: 0, deadLettered: 0, pending: false };
     const budget = opts?.maxTasks ?? Number.POSITIVE_INFINITY;
     await this.#seedReducers();
@@ -324,17 +340,17 @@ export class BuildEngine {
       const outcomes = await this.#executeAll(claims);
       const before = { ...stats };
       const released = await this.#commitBatch(outcomes, stats, writesBefore);
-      if (opts?.onProgress) {
-        this.#report(opts.onProgress, {
-          builder: (claims[0] as Claim).builder,
-          tasks: claims.length,
-          executed: stats.executed - before.executed,
-          skipped: stats.skipped - before.skipped,
-          failed: stats.failed - before.failed,
-          deadLettered: stats.deadLettered - before.deadLettered,
-          released,
-        });
-      }
+      const progress: RunProgress = {
+        builder: (claims[0] as Claim).builder,
+        tasks: claims.length,
+        executed: stats.executed - before.executed,
+        skipped: stats.skipped - before.skipped,
+        failed: stats.failed - before.failed,
+        deadLettered: stats.deadLettered - before.deadLettered,
+        released,
+      };
+      if (opts?.onProgress) this.#report(opts.onProgress, progress);
+      yield progress;
     }
   }
 
