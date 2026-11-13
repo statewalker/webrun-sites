@@ -136,8 +136,9 @@ independent because a builder never reads its own outputs.
 `steps()` is `run()` as an async generator. It yields one `RunProgress` per committed batch
 (`{ builder, tasks, executed, skipped, failed, deadLettered, released }`) and returns the run's
 `RunStats`. The engine waits at every `yield`: the batch is committed and no claim is held, so the
-caller can pause as long as it likes, or stop. `break` (or `return()`, or an exception in the loop)
-ends the run cleanly, and the next `run()` or `steps()` continues from the queue.
+caller can pause as long as it likes, or stop. `break` (or an exception in the loop) ends the run
+cleanly, and the next `run()` or `steps()` continues from the queue. Calling `return(value)` by hand
+works too; the generator then completes with that `value`.
 
 ```ts
 let tasks = 0;
