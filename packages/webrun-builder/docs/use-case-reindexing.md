@@ -63,6 +63,7 @@ import type { FilesApi } from "@statewalker/webrun-files";
 interface FullTextIndex {
   add(id: string, text: string): Promise<void>;
   remove(id: string): Promise<void>;
+  clear(): Promise<void>;
   flush(): Promise<void>;
 }
 interface VectorIndex {
@@ -73,7 +74,8 @@ declare function extractText(files: FilesApi, path: string): Promise<string | un
 declare function screenshot(files: FilesApi, path: string): Promise<Uint8Array>;
 declare function embed(text: string, model: string): Promise<Float32Array>;
 declare function sha256(data: string | Uint8Array): Promise<string>;
-declare function splitIntoChunks(text: string, size: number): string[];
+/** Splits on paragraph / heading boundaries, so an edit changes only the chunks it touches. */
+declare function splitIntoChunks(text: string): string[];
 
 const EMBED_MODEL = "text-embedding-3-small";
 
@@ -94,7 +96,7 @@ export function indexingBuilders(deps: {
       const text = await extractText(docs, `/${ctx.key}`);
       if (!text) return;                                   // not extractable: no rows
       ctx.emit("content", ctx.key, { textHash: await sha256(text) });
-      splitIntoChunks(text, 1500).forEach((chunk, i) =>
+      splitIntoChunks(text).forEach((chunk, i) =>
         ctx.emit("chunks", `${ctx.key}#${i}`, { text: chunk }),
       );
       // A chunk the document no longer has (#39 when it shrank to 38 chunks) is simply not
@@ -142,21 +144,27 @@ export function indexingBuilders(deps: {
     inputs: ["chunks"],
     outputs: ["fulltext"],
     async run(ctx) {
-      if (ctx.state === undefined) {
-        // First run, or after invalidate("FullText"): rebuild from every chunk.
-        for (const row of await ctx.list("chunks")) {
-          await fullText.add(row.key, (row.value as { text: string }).text);
-        }
+      let count = (ctx.state as { chunks: number } | undefined)?.chunks;
+      if (count === undefined) {
+        // First run, or after invalidate("FullText"): rebuild the index from every chunk.
+        await fullText.clear();
+        const rows = await ctx.list("chunks");
+        for (const row of rows) await fullText.add(row.key, (row.value as { text: string }).text);
+        count = rows.length;
       } else {
         for (const c of await ctx.changes("chunks")) {
-          if (c.value === undefined) await fullText.remove(c.key);                     // retracted
-          else await fullText.add(c.key, (c.value as { text: string }).text);          // new / changed
+          if (c.value === undefined) {                                   // retracted
+            await fullText.remove(c.key);
+            count--;
+          } else {                                                       // new or changed
+            await fullText.add(c.key, (c.value as { text: string }).text);
+            if (c.previous === undefined) count++;
+          }
         }
       }
       await fullText.flush();
-      const docCount = new Set((await ctx.list("chunks")).map((r) => r.key.split("#")[0])).size;
-      ctx.setState({ docs: docCount });
-      ctx.emit("fulltext", "index", { docs: docCount });
+      ctx.setState({ chunks: count });
+      ctx.emit("fulltext", "index", { chunks: count });
     },
   };
 
@@ -199,13 +207,22 @@ async function reindex(signal?: AbortSignal) {
   }
 }
 
+// One pass at a time: a tick that comes while a pass is running is skipped.
+let running: Promise<void> | undefined;
+const tick = () => {
+  running ??= reindex()
+    .catch(console.error)
+    .finally(() => {
+      running = undefined;
+    });
+};
 await reindex();                                  // cold start: indexes everything
-setInterval(() => reindex(), 30_000);             // or call it from a file watcher
+setInterval(tick, 30_000);                        // or call tick() from a file watcher
 ```
 
 `readAll` is a helper that reads the whole file into one byte array. Leave out `fingerprint` to use
 the default `{ mtime, size }`: cheaper, but a plain touch counts as a change. Run one `reindex()` at
-a time; the engine refuses a second run while one is in progress.
+a time (the guard above); the engine refuses a second run while one is in progress.
 
 ## One edit, followed through
 
@@ -216,7 +233,7 @@ follows it only as far as values actually change.
 flowchart LR
   src(["sources/a.pdf<br/>hash changed"]) --> ex["Extract(a.pdf)"]
   src --> sh["Screenshot(a.pdf)"]
-  ex --> same(["38 chunks equal"])
+  ex --> same(["the other 38 chunks equal"])
   same -. "no change: stop" .-> stop["nothing downstream"]
   ex --> changed(["chunks #35;7, #35;8 changed"])
   changed --> em["Embed #35;7, #35;8"]
@@ -224,7 +241,9 @@ flowchart LR
   sh --> png(["screenshots/a.pdf"])
 ```
 
-Two embedding calls instead of forty, and the other 999 files are not touched.
+Two embedding calls instead of forty, and the other 999 files are not touched. This relies on chunks
+following paragraph boundaries (as `splitIntoChunks` does here): with fixed-size chunks, an edit
+that changes the text's length shifts every later chunk boundary, and those chunks re-embed too.
 
 ## What each change re-runs
 
@@ -237,7 +256,7 @@ Two embedding calls instead of forty, and the other 999 files are not touched.
 | `a.pdf` shrank from 40 to 38 chunks | Extract(a); `#38` and `#39` are retracted, so Embed disposes their vectors and FullText removes them | Unchanged chunks |
 | `b.pdf` deleted | b's Extract and Screenshot tasks are dead: retracted, the PNG is deleted; every Embed task of b disposes its vector; FullText removes b's chunks | Every other file |
 | `c.pdf` added | c's tasks only, plus one FullText fold | Every other file |
-| Extraction of `d.pdf` throws | Retried up to 3 times, then a dead letter | d's previous chunks, vectors and screenshot stay; the rest of the run completes |
+| Extraction of `d.pdf` throws | Extract(d) is tried 3 times (`maxAttempts`), then becomes a dead letter; Screenshot(d) runs as usual | d's previous chunks and vectors stay; the rest of the run completes. `reindex()` does not requeue dead letters, so d is retried when it changes (or call `engine.requeue`) |
 | Process killed mid-run | The next `reindex()` resumes from the queue; at most one batch is redone | Everything already committed |
 
 ## Forcing a rebuild when code or config changes
@@ -256,7 +275,8 @@ await reindex();
 await engine.invalidate("Extract");
 await reindex();
 
-// Rebuild the full-text index from scratch (its state is dropped, so it re-lists all chunks).
+// Rebuild the full-text index: its state is dropped, so the next run clears the index
+// and re-adds every chunk.
 await engine.invalidate("FullText");
 await reindex();
 ```
@@ -266,7 +286,9 @@ await reindex();
 In the StateWalker kernel the same builders go into `ProjectBuilder` (`@statewalker/workspace.core`)
 through `registerBuilder`, with `run(ctx, project)` instead of `run(ctx)`. The scan is done for you,
 state persists under `.project/state/build`, and a builder's `version` replaces the manual
-`invalidate`: bump it and its tasks re-run before the next build.
+`invalidate`: bump it and its tasks re-run before the next build. `ProjectBuilder` scans with the
+default `{ mtime, size }` fingerprint, so there a touch re-runs `Extract` and `Screenshot` for that
+file (equal chunks still stop there), and `docs` must be the project's files rooted at the project.
 
 ```ts
 import { ProjectBuilder, type RegisteredBuilder } from "@statewalker/workspace.core";
