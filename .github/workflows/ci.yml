@@ -7,12 +7,12 @@ on:
 
 jobs:
   ci:
-    uses: statewalker/.github/.github/workflows/ci.yml@main
+    uses: statewalker/statewalker-ci/.github/workflows/ci.yml@main
 
   # Every merge to main publishes: there is no version pull request.
   #
   # `release` (after a green CI on main): writes the changesets nobody wrote by hand
-  # (statewalker/.github's scripts/release-changesets.mjs: a patch for every public package whose
+  # (statewalker/statewalker-ci's scripts/release-changesets.mjs: a patch for every public package whose
   # packed files or published manifest differ from npm's `latest`, a minor (0.x) / major when a
   # dependency moved to another breaking line), applies all pending changesets with
   # `changeset version` (versions + CHANGELOG.md), commits that as "chore: version packages" to
@@ -49,7 +49,7 @@ jobs:
       - name: Release scripts
         uses: actions/checkout@v7
         with:
-          repository: statewalker/.github
+          repository: statewalker/statewalker-ci
           ref: main
           path: .statewalker-ci
 
