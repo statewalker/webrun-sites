@@ -9,6 +9,22 @@ jobs:
   ci:
     uses: statewalker/statewalker-ci/.github/workflows/ci.yml@main
 
+  # The lockfile-only pull request that .github/workflows/statewalker-update.yml opens: merged
+  # once every other check on it passes, after checking it changes pnpm-lock.yaml alone
+  # (statewalker/statewalker-ci's merge-lockfile.yml; statewalker-root docs/process/merging.md).
+  lockfile:
+    needs: ci
+    # !cancelled(): also after a failed check job, so the pull request gets a comment saying why.
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && github.head_ref == 'deps/statewalker-lockfile' }}
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+      statuses: read
+      actions: read
+    uses: statewalker/statewalker-ci/.github/workflows/merge-lockfile.yml@main
+    secrets: inherit
+
   # Every merge to main publishes: there is no version pull request.
   #
   # `release` (after a green CI on main): writes the changesets nobody wrote by hand
@@ -209,3 +225,14 @@ jobs:
             gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && continue
             gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "${{ needs.release.outputs.sha }}" --notes "Published to npm."
           done
+
+  # What this run published reaches the other repositories of the statewalker-release App's
+  # installation as a `statewalker-published` dispatch; each dependent then moves its lockfile
+  # within its ranges (statewalker/statewalker-ci's notify-dependents.yml, which reads the
+  # published tarballs from the `packages` artifact). Also after a partly failed publish.
+  notify:
+    needs: publish
+    if: ${{ !cancelled() && needs.publish.result != 'skipped' }}
+    permissions: {}
+    uses: statewalker/statewalker-ci/.github/workflows/notify-dependents.yml@main
+    secrets: inherit
