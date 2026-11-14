@@ -1,5 +1,11 @@
 # @statewalker/webrun-builder
 
+## 0.4.2
+
+### Patch Changes
+
+- 5f99d3e: Docs: `docs/use-case-reindexing.md` (re-indexing a document folder: extraction, chunks, full-text and vector indexes, screenshots, change detection and incremental rebuilds) and a `docs/README.md` index.
+
 ## 0.4.1
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/webrun-builder",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "private": false,
   "type": "module",
   "description": "Incremental, idempotent, resumable build engine: builders over collections with dynamic dependencies, early cut-off, automatic retraction and dead letters; all state in a pluggable ordered KV (memory, FilesApi, SQLite).",
