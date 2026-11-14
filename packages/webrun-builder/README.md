@@ -34,6 +34,8 @@ is this engine.
 
 How it works, with diagrams — the store, how a change propagates, early cut-off, retraction,
 failures and running in steps: [docs/how-it-works.md](docs/how-it-works.md).
+A complete use case — re-indexing a document folder into full-text and vector indexes with
+screenshots, with change detection and incremental rebuilds: [docs/use-case-reindexing.md](docs/use-case-reindexing.md).
 
 ## How to use
 
