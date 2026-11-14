@@ -3,7 +3,8 @@
 This document explains how `@statewalker/webrun-builder` runs builds: what it stores, how a change
 travels through the builders, why unchanged outputs stop the work early, how deletions and failures
 are handled, and how to run a build step by step. The [README](../README.md) is the API reference;
-this is the mental model behind it.
+this is the mental model behind it. A worked example, re-indexing a document folder, is in
+[use-case-reindexing.md](use-case-reindexing.md).
 
 ## Contents
 
