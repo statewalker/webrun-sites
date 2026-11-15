@@ -19,7 +19,6 @@
   },
   "devDependencies": {
     "@statewalker/webrun-files-mem": "catalog:",
-    "@statewalker/webrun-files-sqlite": "catalog:",
     "@types/node": "catalog:",
     "tsx": "catalog:",
     "typescript": "catalog:",

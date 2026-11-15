@@ -8,12 +8,12 @@
  */
 import { DatabaseSync } from "node:sqlite";
 import { BuildEngine, SqlKV as RealSqlKV } from "@statewalker/webrun-builder";
-import { NodeSqlDriver } from "@statewalker/webrun-files-sqlite";
 import { double, len, rng, split, upper } from "../src/core/fixtures.js";
 import { MemKV } from "../src/core/kv.js";
 import { SqlKV } from "../src/core/sql-kv.js";
 import type { BuilderDef } from "../src/core/types.js";
 import { QueueEngine } from "../src/prototypes/queue.js";
+import { NodeSqlDriver } from "../tests/node-sql-driver.js";
 
 const BUILDERS: BuilderDef[] = [split, upper, len, double];
 const WORDS = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu".split(" ");

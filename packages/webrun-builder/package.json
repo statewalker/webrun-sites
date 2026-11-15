@@ -46,7 +46,6 @@
   },
   "devDependencies": {
     "@statewalker/webrun-files-mem": "catalog:",
-    "@statewalker/webrun-files-sqlite": "catalog:",
     "@types/node": "catalog:",
     "rimraf": "catalog:",
     "tsdown": "catalog:",
