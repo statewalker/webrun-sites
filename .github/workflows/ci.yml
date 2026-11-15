@@ -9,6 +9,9 @@ jobs:
   ci:
     uses: statewalker/statewalker-ci/.github/workflows/ci.yml@main
     with:
+      baseline: library
+      package-checks: true
+      secret-scan: true
       release-path: true
 
   # The lockfile-only pull request that .github/workflows/statewalker-update.yml opens: merged

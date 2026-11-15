@@ -1,3 +1,4 @@
+import { readFile } from "@statewalker/webrun-files";
 import { MemFilesApi } from "@statewalker/webrun-files-mem";
 import { beforeAll, describe, expect, it } from "vitest";
 import { CdnResolver } from "../src/cdn-resolver.js";
@@ -130,12 +131,10 @@ describe.concurrent("end-to-end with JSPM network (gated by JSPM_DEMO_NETWORK=1)
       // (d) no ga.jspm.io string survives in served bytes
       const clientOut = outputs.get("/client");
       if (!clientOut) throw new Error("no client output");
-      const main = new TextDecoder().decode(
-        await new Response(clientOut.read("/main.js")).arrayBuffer().then((b) => new Uint8Array(b)),
-      );
+      const main = new TextDecoder().decode(await readFile(clientOut, "/main.js"));
       expect(main).not.toContain("ga.jspm.io");
       for (const f of externalFiles) {
-        const buf = await new Response(external.read(f)).arrayBuffer();
+        const buf = await readFile(external, f);
         const text = new TextDecoder().decode(buf);
         expect(text).not.toContain("ga.jspm.io");
       }

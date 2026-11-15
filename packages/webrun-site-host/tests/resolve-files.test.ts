@@ -24,7 +24,7 @@ describe("resolveFilesSource", () => {
     const bytes = new Uint8Array([1, 2, 3]);
     const files = await resolveFilesSource({ "/data.bin": bytes });
     const stats = await files.stats("/data.bin");
-    expect(stats?.size).toBe(3);
+    expect(stats?.kind === "file" ? stats.size : undefined).toBe(3);
   });
 
   it("passes a FilesApi instance through without modification", async () => {

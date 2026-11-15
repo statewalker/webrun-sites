@@ -19,7 +19,7 @@
     "preview": "vite preview --port 5175",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
     "@jspm/generator": "catalog:",
@@ -32,6 +32,7 @@
   },
   "devDependencies": {
     "@statewalker/webrun-files": "catalog:",
+    "@types/node": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vitest": "catalog:"
