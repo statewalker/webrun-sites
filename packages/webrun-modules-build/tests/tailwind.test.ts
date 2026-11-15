@@ -24,7 +24,12 @@ function spyCss(): CssTransform & { big: number } {
  *  the scanner sees a distinct mtime after a same-bytes touch. */
 const tick = () => new Promise((r) => setTimeout(r, 5));
 
-describe("newProjectBuild — Tailwind transform (build-only)", () => {
+/** Generating the all-classes Tailwind stylesheet takes seconds, and longer on a
+ *  loaded machine: vitest's default 5 s per test made a varying subset of these
+ *  tests time out (statewalker/webrun-sites#7). */
+const TAILWIND_TIMEOUT = { timeout: 60_000 };
+
+describe("newProjectBuild — Tailwind transform (build-only)", TAILWIND_TIMEOUT, () => {
   it("emits a /~/styles.js injector whose embedded CSS carries the generic utilities", async () => {
     const project = new MemFilesApi();
     await writeText(project, "/main.tsx", `import "./styles.css";\nexport const x = 1;`);
@@ -92,7 +97,7 @@ describe("newProjectBuild — Tailwind transform (build-only)", () => {
   }, 10_000); // median 1327ms over 3 idle runs (1480/1327/1033ms); 4x headroom for loaded CI
 });
 
-describe("newProjectBuild — Tailwind inputs-only cache key", () => {
+describe("newProjectBuild — Tailwind inputs-only cache key", TAILWIND_TIMEOUT, () => {
   afterEach(() => {
     delete process.env.TW_CACHE_VER;
   });
