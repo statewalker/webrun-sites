@@ -16,9 +16,9 @@ catalog:
   "@libp2p/websockets": ^10.1.21
   "@multiformats/multiaddr": ^13.0.3
   "@statewalker/webrun-http-browser": "^0.7.0"
-  "@statewalker/webrun-http-streams": "^0.3.0"
+  "@statewalker/webrun-http-streams": "^0.4.2"
   "@statewalker/webrun-streams": "^0.2.0"
-  "@statewalker/webrun-streams-libp2p": "^0.1.6"
+  "@statewalker/webrun-streams-libp2p": "^0.2.0"
   "@statewalker/webrun-streams-livekit": "^0.2.0"
   "@types/semver": "^7.8.0"
   "acorn": "^8.18.0"
