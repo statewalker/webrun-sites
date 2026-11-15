@@ -133,27 +133,22 @@ ones use the catalog, lint, format, build, typecheck and tests, then checks that
 every `exports` target exists, every bare import in `dist/` is a declared
 dependency, and packed manifests contain no `workspace:` or `catalog:` specifiers.
 
-**Every merge to `main` publishes.** After a green CI on `main`, the `release` job:
-1. writes a changeset for every public package whose packed files or published
-   manifest differ from npm's `latest` (a patch; a minor/major when a dependency
-   moved to another breaking line);
-2. applies all pending changesets (`changeset version`: versions and
-   `CHANGELOG.md`) and commits them to `main` as "chore: version packages";
-3. packs every public package whose version npm lacks.
+**Merging the version pull request publishes.** After a green CI on `main`, the
+`version` job writes a changeset for every public package whose packed files or
+published manifest differ from npm's `latest` (a patch; a minor/major when a
+dependency moved to another breaking line) and opens or updates a "chore: version
+packages" pull request that applies all pending changesets (versions and
+`CHANGELOG.md`). Merging it packs every public package whose version npm lacks;
+the `publish` job uploads them with npm trusted publishing (OIDC, no token in
+GitHub) and provenance, and tags a GitHub release per package. Add a changeset
+yourself (`pnpm changeset`) to choose the bump level or the changelog text.
+Dependency updates come from Renovate.
 
-The `publish` job then uploads them with npm trusted publishing (OIDC, no token
-in GitHub) and provenance, and tags a GitHub release per package. Add a
-changeset yourself (`pnpm changeset`) to choose the bump level or the changelog
-text. Dependency updates come from Renovate.
-
-One-time set-up: npm's trusted publisher for each package names
-this repository, `ci.yml` and the `npm` environment; the `npm` environment has no
-required reviewers (add some to gate releases behind an approval); the workflow
-token may push to `main` (branch protection must allow `github-actions[bot]`).
-A package npm has never seen is skipped with a warning until its first version is
-published by hand. When `main` moves on while a release runs, that run steps aside
-and the newer merge's run releases everything; the version commit gets no CI run
-of its own.
+One-time set-up: npm's trusted publisher for each package names this
+repository, `ci.yml` and the `npm` environment (which admits only `main`, with
+no required reviewers); the `statewalker-release` GitHub App opens the version
+pull request, so its checks run. A package npm has never seen fails `publish`
+with a 404 until its first version is published by hand.
 
 ### Configuration files
 
