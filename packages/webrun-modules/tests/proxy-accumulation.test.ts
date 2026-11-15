@@ -5,11 +5,12 @@ import type {
   ListOptions,
   ReadOptions,
 } from "@statewalker/webrun-files";
-import { readText } from "@statewalker/webrun-files";
+import { readText, writeText } from "@statewalker/webrun-files";
 import { MemFilesApi } from "@statewalker/webrun-files-mem";
 import { describe, expect, it } from "vitest";
 import type { PreprocessContext } from "../src/preprocess/context.js";
 import { ensureGlobalsProxy, ensureProxy } from "../src/preprocess/resolve.js";
+import { analyze } from "../src/transform/index.js";
 
 /**
  * Delays the FIRST call to `write` so it settles after a later call — makes a
@@ -202,5 +203,96 @@ describe("proxy shape accumulation", () => {
     const body = await readText(cache, "/t/browser/~/~deps/~globals.js");
     expect(body).toContain("as process }");
     expect(body).toContain("as Buffer }");
+  });
+
+  it("seeds from the emitted proxy when its .shape.json sidecar is missing (#3)", async () => {
+    // A cache from a release before the sidecars, or one whose sidecar was deleted:
+    // a fresh run walking ONE importer must not narrow the proxy to its names.
+    const cache = new MemFilesApi();
+    const body = "/t/browser/~/~deps/react/index.js";
+    const run1 = mkCtx(cache);
+    await ensureProxy(
+      PID,
+      HOST,
+      { names: ["useState"], hasDefault: true, hasNamespace: false },
+      run1,
+    );
+    await ensureProxy(
+      PID,
+      HOST,
+      { names: ["useEffect"], hasDefault: false, hasNamespace: false },
+      run1,
+    );
+    await cache.remove(`${body}.shape.json`);
+
+    const run2 = mkCtx(cache); // a fresh process: empty accumulator, no sidecar
+    await ensureProxy(
+      PID,
+      HOST,
+      { names: ["useRef"], hasDefault: false, hasNamespace: false },
+      run2,
+    );
+    const out = await readText(cache, body);
+    expect(out).toContain("export const useState = __m.useState");
+    expect(out).toContain("export const useEffect = __m.useEffect");
+    expect(out).toContain("export const useRef = __m.useRef");
+    expect(out).toContain("export default __m;");
+    // …and the sidecar is back, so the next run seeds from it as usual.
+    expect(JSON.parse(await readText(cache, `${body}.shape.json`)).names).toEqual(
+      expect.arrayContaining(["useState", "useEffect", "useRef"]),
+    );
+  });
+
+  it("seeds from the emitted proxy when its sidecar is corrupt (#3)", async () => {
+    const cache = new MemFilesApi();
+    const body = "/t/browser/~/~deps/react/index.js";
+    await ensureProxy(
+      PID,
+      HOST,
+      { names: ["useState"], hasDefault: false, hasNamespace: false },
+      mkCtx(cache),
+    );
+    await writeText(cache, `${body}.shape.json`, "{not json");
+
+    await ensureProxy(
+      PID,
+      HOST,
+      { names: ["useRef"], hasDefault: false, hasNamespace: false },
+      mkCtx(cache),
+    );
+    const out = await readText(cache, body);
+    expect(out).toContain("export const useState = __m.useState");
+    expect(out).toContain("export const useRef = __m.useRef");
+  });
+
+  it("keeps a reserved-word key in alias form when seeding from the artifact (#3)", async () => {
+    // Run 1 emits `delete` (a host namespace key) as `export { __h0 as delete }`;
+    // reading it back as a plain name must not turn it into `export const delete`.
+    const cache = new MemFilesApi();
+    const body = "/t/browser/~/~deps/kv/index.js";
+    const pid = "~/~deps/kv/index.js";
+    const kv = { kind: "host", name: "kv" } as const;
+    const withRegistry = () => {
+      const ctx = mkCtx(cache);
+      (ctx as { registry: unknown }).registry = new Map([["kv", { get() {}, delete() {} }]]);
+      return ctx;
+    };
+    await ensureProxy(
+      pid,
+      kv,
+      { names: [], hasDefault: false, hasNamespace: true },
+      withRegistry(),
+    );
+    await cache.remove(`${body}.shape.json`);
+    await ensureProxy(
+      pid,
+      kv,
+      { names: ["get"], hasDefault: false, hasNamespace: false },
+      withRegistry(),
+    );
+    const out = await readText(cache, body);
+    expect(out).not.toContain("export const delete");
+    expect(out).toMatch(/export \{ __n\d+ as delete \};/);
+    await expect(analyze(out, "esm")).resolves.toBeDefined(); // parses
   });
 });
