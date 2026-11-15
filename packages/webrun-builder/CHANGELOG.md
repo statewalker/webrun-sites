@@ -1,5 +1,14 @@
 # @statewalker/webrun-builder
 
+## 0.5.0
+
+### Minor Changes
+
+- Release of the changes since the last published version:
+  
+  - @statewalker/webrun-files ^0.10.0 -> ^0.12.0
+  - files changed: dist/index.d.mts, dist/index.mjs, dist/index.mjs.map, src/store/sql-kv.ts
+
 ## 0.4.2
 
 ### Patch Changes
