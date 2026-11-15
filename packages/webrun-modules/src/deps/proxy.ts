@@ -3,6 +3,17 @@ import type { EndpointBinding, ModuleImport } from "../types.js";
 
 const IDENT_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
+/** Words that are legal export NAMES but not binding identifiers, so a name among
+ *  them cannot be `export const`-ed and takes the alias form instead. */
+const RESERVED = new Set(
+  (
+    "await break case catch class const continue debugger default delete do else enum " +
+    "export extends false finally for function if implements import in instanceof " +
+    "interface let new null package private protected public return static super " +
+    "switch this throw true try typeof var void while with yield"
+  ).split(" "),
+);
+
 /** The module root that owns a `~deps/`: the project root (`~`) for authored
  *  sources, the package root (`{name}@{version}`) for npm files. Every id reaching
  *  here is one of those two forms, the only ones `loadRaw` accepts; any other id
@@ -74,7 +85,12 @@ export function proxyBody(args: {
     ];
     if (imp.hasDefault || imp.hasNamespace || !named.length) lines.push("export default __m;");
     const unique = [...new Set(named)];
-    for (const n of unique) lines.push(`export const ${n} = __m.${n};`);
+    unique.forEach((n, i) => {
+      // A reserved word (`delete`) is a legal export name but not a `const`.
+      if (RESERVED.has(n))
+        lines.push(`const __n${i} = __m[${JSON.stringify(n)}];`, `export { __n${i} as ${n} };`);
+      else lines.push(`export const ${n} = __m.${n};`);
+    });
     // ESM cannot `export *` from a runtime object, so a namespace (`* as X`) gets the
     // keys the instance has NOW, at emit time. Alias form: a key may be a reserved
     // word (`delete`), legal as an export name but not as a `const`.

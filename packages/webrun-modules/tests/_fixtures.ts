@@ -47,7 +47,7 @@ export function fakeFetch(routes: Record<string, Route>): typeof fetch {
     const r = routes[url];
     if (!r) return new Response(null, { status: 404 });
     if (r.status && r.status >= 400) return new Response(null, { status: r.status });
-    if (r.bytes) return new Response(r.bytes, { status: 200 });
+    if (r.bytes) return new Response(new Uint8Array(r.bytes), { status: 200 });
     return new Response(JSON.stringify(r.json), {
       status: 200,
       headers: { "content-type": "application/json" },
