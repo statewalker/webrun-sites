@@ -21,7 +21,7 @@ import {
   type UrlPolicy,
 } from "@statewalker/webrun-modules";
 import { newTailwindTransform, tailwindCacheKey } from "@statewalker/webrun-tailwind";
-import { SERVED_COLLECTION, webrunBuilders } from "./builders.js";
+import { SERVED_COLLECTION, toProjectId, walkEntry, webrunBuilders } from "./builders.js";
 import type { WebrunBuildHost } from "./host.js";
 import { makeExtMapPolicy } from "./url-policy.js";
 
@@ -51,6 +51,47 @@ export interface ProjectBuildOptions {
 export interface ProjectBuild {
   /** Scan the project and run the pipeline to convergence; returns the emitted entry pointers. */
   build(): Promise<{ served: string[] }>;
+  /**
+   * Remove every file under a `~deps` folder of the cache (proxies and their
+   * sidecars) that the entry points cannot reach. A separate operation, not part
+   * of `build()`: the build adds and rewrites proxies but never removes one whose
+   * last importer went away.
+   *
+   * `entries` are project-relative source paths (`src/main.ts`). Without them,
+   * the public entry points of the project's `package.json` are used: `main`,
+   * `module`, a string `browser`, and every string target of `exports` (patterns
+   * with `*` are skipped). Throws, removing nothing, when there is no entry point
+   * or one is not a project file. Walking the entries emits whatever they reach
+   * that is out of date, as a build would. Returns the entries used and the
+   * removed cache paths.
+   */
+  prune(options?: { entries?: string[] }): Promise<{ entries: string[]; removed: string[] }>;
+}
+
+/** The sidecars written beside an emitted artifact; pruned with it. */
+const SIDECARS = [".shape.json", ".exports.json", ".hash"];
+
+/** `./src/x.ts` → `src/x.ts`. */
+function normalizeEntry(path: string): string {
+  return path.replace(/^\.?\/+/, "");
+}
+
+/** The public entry points `package.json` declares, as project-relative paths. */
+export function packageEntryPoints(manifest: Record<string, unknown>): string[] {
+  const out = new Set<string>();
+  const add = (v: unknown) => {
+    if (typeof v === "string" && !v.includes("*")) out.add(normalizeEntry(v));
+  };
+  const walk = (v: unknown) => {
+    if (typeof v === "string") add(v);
+    else if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === "object") Object.values(v).forEach(walk);
+  };
+  add(manifest.main);
+  add(manifest.module);
+  add(manifest.browser); // an object `browser` is a substitution map, not an entry
+  walk(manifest.exports);
+  return [...out];
 }
 
 /** FNV-1a (32-bit) content hash — a dependency-free digest for the per-id source
@@ -156,6 +197,46 @@ export function newProjectBuild(opts: ProjectBuildOptions): ProjectBuild {
         );
       }
       return { served: await engine.keys(SERVED_COLLECTION) };
+    },
+
+    async prune(options = {}) {
+      let entries = options.entries?.map(normalizeEntry);
+      if (!entries) {
+        const text = await tryReadText(project, "/package.json");
+        entries = text ? packageEntryPoints(JSON.parse(text)) : [];
+      }
+      if (entries.length === 0) {
+        throw new Error(
+          "prune: no entry points: pass `entries`, or declare `main` or `exports` in the project's package.json",
+        );
+      }
+      for (const entry of entries) {
+        if ((await project.stats(`/${entry}`))?.kind !== "file") {
+          throw new Error(`prune: entry point ${JSON.stringify(entry)} is not a project file`);
+        }
+      }
+      const reached = new Set<string>();
+      for (const entry of entries) {
+        for (const id of await walkEntry(toProjectId(entry), host)) {
+          reached.add(ctx.policy.emittedPath(id));
+        }
+      }
+      const segment = `/${ctx.depsFolder}/`;
+      const removed: string[] = [];
+      for await (const info of cache.list("/", { recursive: true })) {
+        if (info.kind !== "file" || info.path.startsWith("/raw/")) continue;
+        const suffix = SIDECARS.find((s) => info.path.endsWith(s));
+        const artifact = suffix ? info.path.slice(0, -suffix.length) : info.path;
+        if (!artifact.includes(segment) || reached.has(artifact)) continue;
+        removed.push(info.path);
+      }
+      for (const path of removed) await cache.remove(path);
+      // Forget the pruned proxies' accumulated shapes, so a later build in this
+      // process starts them afresh, as a new process would.
+      for (const id of [...ctx.proxies.keys()]) {
+        if (!reached.has(ctx.policy.emittedPath(id))) ctx.proxies.delete(id);
+      }
+      return { entries, removed: removed.sort() };
     },
   };
 }

@@ -84,6 +84,32 @@ await writeText(project, "/util.ts", `export const u = "y";`);
 await build.build(); // re-transforms util.ts; main.ts is reused from the cache
 ```
 
+### `prune`: remove the proxies nothing reaches
+
+The build adds and rewrites `~deps` proxies but never removes one: after the last
+importer of a package goes away, its proxy stays in the cache. `prune()` is the
+separate operation that removes them.
+
+```ts
+const build = newProjectBuild({ project, cache });
+await build.build();
+
+// The public entry points of the project's package.json (`main`, `module`, a
+// string `browser`, every string target of `exports`):
+const { entries, removed } = await build.prune();
+// Or explicit entry points, as project-relative paths:
+await build.prune({ entries: ["src/main.ts", "src/worker.ts"] });
+```
+
+It walks the closure of the entry points, emitting whatever is out of date as a
+build would, then removes every file under a `~deps` folder of the cache that
+the walk did not reach, with its sidecars (`.shape.json`, `.hash`,
+`.exports.json`). Only `~deps` files are removed: emitted project modules and the
+`/raw/` package cache stay. It throws, removing nothing, when there are no entry
+points or one is not a project file. A module the entry points do not import
+(another page, a worker started by URL) loses its proxies unless it is listed in
+`entries`.
+
 ### `makeExtMapPolicy`: the URL policy on its own
 
 `makeExtMapPolicy(ctx)` takes a `PreprocessContext` from `@statewalker/webrun-modules`
