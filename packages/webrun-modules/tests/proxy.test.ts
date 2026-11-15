@@ -58,6 +58,18 @@ describe("proxyId", () => {
 });
 
 describe("proxyBody", () => {
+  it("host binding exports a reserved-word name in alias form", () => {
+    const body = proxyBody({
+      binding: { kind: "host", name: "kv" },
+      imp: { names: ["delete", "get"], hasNamespace: false, hasDefault: false },
+      registryKey: "__webrunHostRegistry",
+    });
+    expect(body).not.toContain("export const delete");
+    expect(body).toContain('const __n0 = __m["delete"];');
+    expect(body).toContain("export { __n0 as delete };");
+    expect(body).toContain("export const get = __m.get;");
+  });
+
   // The body is deliberately INDEPENDENT of `imp.names`: one proxy is shared by
   // every file of a module root, a client links it on the first importer, and a
   // surface narrowed to the importers seen so far breaks all the later ones.

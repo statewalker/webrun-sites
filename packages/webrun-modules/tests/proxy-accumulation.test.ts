@@ -10,6 +10,7 @@ import { MemFilesApi } from "@statewalker/webrun-files-mem";
 import { describe, expect, it } from "vitest";
 import type { PreprocessContext } from "../src/preprocess/context.js";
 import { ensureGlobalsProxy, ensureProxy } from "../src/preprocess/resolve.js";
+import { analyze } from "../src/transform/index.js";
 
 /**
  * Delays the FIRST call to `write` so it settles after a later call — makes a
@@ -219,5 +220,36 @@ describe("proxy shape accumulation", () => {
     const out = await readText(cache, body);
     expect(out).toContain("export const useState = __m.useState");
     expect(out).toContain("export const useRef = __m.useRef");
+  });
+
+  it("keeps a reserved-word key in alias form when seeding from the artifact (#3)", async () => {
+    // Run 1 emits `delete` (a host namespace key) as `export { __h0 as delete }`;
+    // reading it back as a plain name must not turn it into `export const delete`.
+    const cache = new MemFilesApi();
+    const body = "/t/browser/~/~deps/kv/index.js";
+    const pid = "~/~deps/kv/index.js";
+    const kv = { kind: "host", name: "kv" } as const;
+    const withRegistry = () => {
+      const ctx = mkCtx(cache);
+      (ctx as { registry: unknown }).registry = new Map([["kv", { get() {}, delete() {} }]]);
+      return ctx;
+    };
+    await ensureProxy(
+      pid,
+      kv,
+      { names: [], hasDefault: false, hasNamespace: true },
+      withRegistry(),
+    );
+    await cache.remove(`${body}.shape.json`);
+    await ensureProxy(
+      pid,
+      kv,
+      { names: ["get"], hasDefault: false, hasNamespace: false },
+      withRegistry(),
+    );
+    const out = await readText(cache, body);
+    expect(out).not.toContain("export const delete");
+    expect(out).toMatch(/export \{ __n\d+ as delete \};/);
+    await expect(analyze(out, "esm")).resolves.toBeDefined(); // parses
   });
 });
