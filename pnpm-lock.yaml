@@ -53,7 +53,7 @@ catalogs:
       version: 0.2.3
     '@statewalker/indexer-api':
       specifier: ^0.1.3
-      version: 0.1.4
+      version: 0.1.5
     '@statewalker/indexer-chunker':
       specifier: ^0.1.2
       version: 0.1.2
@@ -62,13 +62,13 @@ catalogs:
       version: 0.1.4
     '@statewalker/indexer-fulltext':
       specifier: ^0.1.3
-      version: 0.1.5
+      version: 0.1.6
     '@statewalker/indexer-mem-minisearch':
       specifier: ^0.1.3
       version: 0.1.5
     '@statewalker/indexer-vector':
       specifier: ^0.1.3
-      version: 0.1.5
+      version: 0.1.6
     '@statewalker/webrun-files':
       specifier: ^0.12.0
       version: 0.12.0
@@ -214,7 +214,7 @@ importers:
         version: 0.2.3
       '@statewalker/indexer-api':
         specifier: 'catalog:'
-        version: 0.1.4
+        version: 0.1.5
       '@statewalker/indexer-chunker':
         specifier: 'catalog:'
         version: 0.1.2
@@ -223,13 +223,13 @@ importers:
         version: 0.1.4
       '@statewalker/indexer-fulltext':
         specifier: 'catalog:'
-        version: 0.1.5
+        version: 0.1.6
       '@statewalker/indexer-mem-minisearch':
         specifier: 'catalog:'
         version: 0.1.5
       '@statewalker/indexer-vector':
         specifier: 'catalog:'
-        version: 0.1.5
+        version: 0.1.6
       '@statewalker/webrun-builder':
         specifier: workspace:^
         version: link:../../packages/webrun-builder
@@ -1664,8 +1664,8 @@ packages:
   '@statewalker/content-extractors@0.2.3':
     resolution: {integrity: sha512-ooH5BNAmd6RjuAc3YbMoh1pLV3E7zs7v5t0FgKfRU5p/fZZD9Y/uUgHWjcUk6Mxa9yQ+lRuE9kWiCLPoQIxIpQ==}
 
-  '@statewalker/indexer-api@0.1.4':
-    resolution: {integrity: sha512-uE4GSoXDPb7twu341AQQIQFY/u6i5WyQVY/rzdt1vSkIoqpkeESvVvv7c8TeZ7hgyXnYDDttDv2fLSB3uTiOuQ==}
+  '@statewalker/indexer-api@0.1.5':
+    resolution: {integrity: sha512-tHI2TUYhr9DssFC3C7EWLP4ZDk1NSoK5nEwM8XJJx+yIKZN5Rrp3KmwRvqO9dN9OimhfjE/hkj/Y3deEZvL7Uw==}
 
   '@statewalker/indexer-chunker@0.1.2':
     resolution: {integrity: sha512-mbH94Yo86uiXcp7HW1XsORc1yK5KZTo7tDPaeOELfzzKtbOGxgJ4u0RDZICGwQyzvhYgdjZgBV0S/r60S4k20g==}
@@ -1673,8 +1673,8 @@ packages:
   '@statewalker/indexer-core@0.1.4':
     resolution: {integrity: sha512-IgsukcAiIGPLMwinp8S0/OY0IrXoJxjOqy0iJeTEdMlglx529/fl9W4+P3fO8wiO1+CjLgsjcfMHDosTG+2ZWw==}
 
-  '@statewalker/indexer-fulltext@0.1.5':
-    resolution: {integrity: sha512-3q5/JJEWTsZNs55MKQNDSCzewihXzE7Olz7oBstYd5yHXm4ZsrKQHHNYdPEE6855m+wU64MRKzQ7C3EjwQ3L6Q==}
+  '@statewalker/indexer-fulltext@0.1.6':
+    resolution: {integrity: sha512-zDLvig3WLax7QcMzHAVXpfqPFo+QrTo5SZLLwUk5BG4j/pRcGMURmRcF6seYPnzonyOq0ddof3MOnmFiIhCIbg==}
 
   '@statewalker/indexer-mem-minisearch@0.1.5':
     resolution: {integrity: sha512-6/i//Bm6T8tvILkPH5xooMY9ybZU9BWRbdcg+hfOIVB4vr4OQgQMOB3J/4sQQtJpslqwSXyzge4LVhX1HyH9MQ==}
@@ -1682,8 +1682,8 @@ packages:
   '@statewalker/indexer-mem@0.1.5':
     resolution: {integrity: sha512-BQE0ss8AlpInp8G/QGTUW6Qw8KGNNemoQW5iNIQcjjUPzijA6p4xTdGQ/0CsTC0gSI9+gcDn6iczKSsUMtUrtw==}
 
-  '@statewalker/indexer-vector@0.1.5':
-    resolution: {integrity: sha512-py3T7Oy2V+s1+EQa6p9r2ToWrXpDGprRV0/tk1ldOnJckIOKYzbVtamSmCdYxoYUW3499+bLTXV5OpfU+t0tQw==}
+  '@statewalker/indexer-vector@0.1.6':
+    resolution: {integrity: sha512-/ZLcaeF4XnaJXy/+gMS/pRDk7AENMYZpjUJctLXJqS7mUP9tHIKuoUHqspxiXBLCGBAnHNeoviAW5TfvwBCF4A==}
 
   '@statewalker/webrun-files-browser@0.12.0':
     resolution: {integrity: sha512-HZhkQAHM3qGE77VlKvRdFxA5xHx4Do+4gOTF7Jm0omi6OHDNyUYpDKEmSKXweWFtMtmpqHtuP2r9qjW6w1PAbg==}
@@ -5717,38 +5717,38 @@ snapshots:
     transitivePeerDependencies:
       - '@napi-rs/canvas'
 
-  '@statewalker/indexer-api@0.1.4': {}
+  '@statewalker/indexer-api@0.1.5': {}
 
   '@statewalker/indexer-chunker@0.1.2': {}
 
   '@statewalker/indexer-core@0.1.4':
     dependencies:
-      '@statewalker/indexer-api': 0.1.4
-      '@statewalker/indexer-fulltext': 0.1.5
-      '@statewalker/indexer-vector': 0.1.5
+      '@statewalker/indexer-api': 0.1.5
+      '@statewalker/indexer-fulltext': 0.1.6
+      '@statewalker/indexer-vector': 0.1.6
 
-  '@statewalker/indexer-fulltext@0.1.5':
+  '@statewalker/indexer-fulltext@0.1.6':
     dependencies:
-      '@statewalker/indexer-api': 0.1.4
+      '@statewalker/indexer-api': 0.1.5
 
   '@statewalker/indexer-mem-minisearch@0.1.5':
     dependencies:
-      '@statewalker/indexer-api': 0.1.4
+      '@statewalker/indexer-api': 0.1.5
       '@statewalker/indexer-core': 0.1.4
-      '@statewalker/indexer-fulltext': 0.1.5
+      '@statewalker/indexer-fulltext': 0.1.6
       '@statewalker/indexer-mem': 0.1.5
       minisearch: 7.2.0
 
   '@statewalker/indexer-mem@0.1.5':
     dependencies:
-      '@statewalker/indexer-api': 0.1.4
+      '@statewalker/indexer-api': 0.1.5
       '@statewalker/indexer-core': 0.1.4
-      '@statewalker/indexer-vector': 0.1.5
+      '@statewalker/indexer-vector': 0.1.6
       '@uwdata/flechette': 2.8.0
 
-  '@statewalker/indexer-vector@0.1.5':
+  '@statewalker/indexer-vector@0.1.6':
     dependencies:
-      '@statewalker/indexer-api': 0.1.4
+      '@statewalker/indexer-api': 0.1.5
 
   '@statewalker/webrun-files-browser@0.12.0':
     dependencies:
