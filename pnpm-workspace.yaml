@@ -8,12 +8,12 @@ catalog:
   "@chainsafe/libp2p-yamux": ^8.0.1
   "@changesets/cli": "^3.0.3"
   "@jspm/core": "^2.1.0"
-  "@libp2p/circuit-relay-v2": ^4.2.13
-  "@libp2p/identify": ^4.1.14
-  "@libp2p/interface": ^3.3.0
-  "@libp2p/peer-id": ^6.0.15
-  "@libp2p/webrtc": ^6.0.33
-  "@libp2p/websockets": ^10.1.21
+  "@libp2p/circuit-relay-v2": ^4.2.17
+  "@libp2p/identify": ^4.1.18
+  "@libp2p/interface": ^3.4.0
+  "@libp2p/peer-id": ^6.0.18
+  "@libp2p/webrtc": ^7.0.2
+  "@libp2p/websockets": ^10.1.25
   "@multiformats/multiaddr": ^13.0.3
   "@statewalker/webrun-http-browser": "^0.7.0"
   "@statewalker/webrun-http-streams": "^0.4.2"
@@ -25,7 +25,7 @@ catalog:
   "acorn-globals": "^7.0.1"
   "cjs-module-lexer": "^2.2.1"
   "fflate": "^0.8.3"
-  "libp2p": ^3.3.11
+  "libp2p": ^3.5.1
   "lightningcss-wasm": "^1.33.0"
   "livekit-client": "^2.22.3"
   "livekit-server-sdk": "^2.19.1"
