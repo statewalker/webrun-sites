@@ -112,6 +112,7 @@ export function newModuleServer(options: ModuleServerOptions): ModuleServer {
     transforms: newDefaultTransformRegistry(),
     policy: undefined as unknown as UrlPolicy,
     resolveEndpoint: undefined as unknown as EndpointResolver,
+    onMissingFile: options.onMissingFile,
   };
   ctx.policy = makeKeepExtPolicy(ctx);
   ctx.resolveEndpoint = options.resolveEndpoint ?? makeDefaultEndpointResolver(ctx);

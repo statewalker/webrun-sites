@@ -70,6 +70,7 @@ Options (`ProjectBuildOptions`):
 | `transform` | `newDefaultTransform()` | JS/TS transform. |
 | `css` | `newDefaultCssTransform()` | CSS transform. |
 | `depsFolder` | `"~deps"` | Name of the per-module-root dependency proxy folder. |
+| `onMissingFile` | — | `(id) => string \| undefined`: the source of a module file that does not exist. Absent, a missing import fails the build. |
 
 ## Examples
 
