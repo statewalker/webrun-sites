@@ -1,5 +1,19 @@
 # @statewalker/webrun-site-host
 
+## 0.4.0
+
+### Minor Changes
+
+- Release of the changes since the last published version:
+  
+  - @statewalker/webrun-files-mem ^0.10.0 -> ^0.12.0
+  - @statewalker/webrun-files (peer) ^0.9.0 || ^0.10.0 -> ^0.12.0
+
+### Patch Changes
+
+- Updated dependencies
+  - @statewalker/webrun-site-builder@0.3.0
+
 ## 0.3.0
 
 ### Minor Changes

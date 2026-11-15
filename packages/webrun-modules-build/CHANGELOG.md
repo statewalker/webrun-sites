@@ -1,5 +1,18 @@
 # @statewalker/webrun-modules-build
 
+## 0.6.0
+
+### Minor Changes
+
+- Release of the changes since the last published version:
+  
+  - @statewalker/webrun-builder crosses a breaking line
+
+### Patch Changes
+
+- Updated dependencies
+  - @statewalker/webrun-builder@0.5.0
+
 ## 0.5.0
 
 ### Minor Changes
