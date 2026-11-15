@@ -82,10 +82,8 @@ describe("proxyBody", () => {
   // every file of a module root, a client links it on the first importer, and a
   // surface narrowed to the importers seen so far breaks all the later ones.
   it("local binding re-exports the endpoint wholesale, whatever this importer named", () => {
-    const id = proxyId("pkg@1/foo.js", "lodash-es");
     const forImport = (imp: ModuleImport) =>
       proxyBody({
-        proxyId: id,
         binding: { kind: "local", url: "IGNORED" },
         imp,
         registryKey: "__webrunHostRegistry",
@@ -99,7 +97,6 @@ describe("proxyBody", () => {
 
   it("local binding adds `default` only for an importer that wants it", () => {
     const body = proxyBody({
-      proxyId: proxyId("pkg@1/foo.js", "lodash-es"),
       binding: { kind: "local", url: "IGNORED" },
       imp: { names: [], hasNamespace: false, hasDefault: true },
       registryKey: "__webrunHostRegistry",
@@ -110,9 +107,7 @@ describe("proxyBody", () => {
   });
 
   it("host binding reads the shared registry and preserves the instance as default", () => {
-    const id = proxyId("pkg@1/foo.js", "react");
     const body = proxyBody({
-      proxyId: id,
       binding: { kind: "host", name: "react" },
       imp: { names: ["useState"], hasNamespace: false, hasDefault: true },
       registryKey: "__webrunHostRegistry",
