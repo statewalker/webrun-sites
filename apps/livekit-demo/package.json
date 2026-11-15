@@ -25,6 +25,8 @@
   },
   "dependencies": {
     "@statewalker/webrun-http-streams": "catalog:",
+    "@statewalker/webrun-msgpack": "catalog:",
+    "@statewalker/webrun-rpc": "catalog:",
     "@statewalker/webrun-site-builder": "workspace:^",
     "@statewalker/webrun-site-host": "workspace:^",
     "@statewalker/webrun-streams": "catalog:",

@@ -1,7 +1,9 @@
 import { fetchOverDuplex } from "@statewalker/webrun-http-streams";
+import { msgpackCodec } from "@statewalker/webrun-msgpack";
+import { connect, overPipe } from "@statewalker/webrun-rpc";
 import { HostedSiteBuilder } from "@statewalker/webrun-site-host";
 import type { Duplex } from "@statewalker/webrun-streams";
-import { connect as connectLiveKit } from "@statewalker/webrun-streams-livekit";
+import { messageTargetOverLiveKit } from "@statewalker/webrun-streams-livekit";
 import { type RemoteParticipant, type Room, RoomEvent } from "livekit-client";
 import { DEMO_ROOM, SERVER_IDENTITY } from "../lib/config.js";
 import { connectLiveKitRoom } from "../lib/livekit-room.js";
@@ -108,9 +110,9 @@ async function start(): Promise<void> {
   const serverParticipant = await waitForServerPeer(room, SERVER_IDENTITY);
   setStatus(`server participant present (sid:${serverParticipant.sid})`);
 
-  const { call: activeCall } = await connectLiveKit({
-    room,
-    peerIdentity: SERVER_IDENTITY,
+  const { target, signal, maxMessageSize } = messageTargetOverLiveKit(room, SERVER_IDENTITY);
+  const { call: activeCall } = await connect({
+    mux: overPipe(target, { codec: msgpackCodec, side: "initiator", signal, maxMessageSize }),
   });
 
   // Handshake before mounting the site. The server's `participantConnected`

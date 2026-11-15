@@ -1,6 +1,8 @@
 import { serveFetchOverDuplex } from "@statewalker/webrun-http-streams";
+import { msgpackCodec } from "@statewalker/webrun-msgpack";
+import { overPipe, serve } from "@statewalker/webrun-rpc";
 import { SiteBuilder, type SiteHandler } from "@statewalker/webrun-site-builder";
-import { serve as serveLiveKit } from "@statewalker/webrun-streams-livekit";
+import { messageTargetOverLiveKit } from "@statewalker/webrun-streams-livekit";
 import type { RemoteParticipant, Room } from "livekit-client";
 import { DEMO_ROOM, SERVER_IDENTITY } from "../lib/config.js";
 import { connectLiveKitRoom } from "../lib/livekit-room.js";
@@ -151,7 +153,14 @@ async function start(): Promise<void> {
 
   const onParticipantConnected = (p: RemoteParticipant): void => {
     setStatus(`client connected ${p.identity} (sid:${p.sid})`);
-    void serveLiveKit({ room, peerIdentity: p.identity }, httpHandler).then((stop) => {
+    const { target, signal, maxMessageSize } = messageTargetOverLiveKit(room, p.identity);
+    const mux = overPipe(target, {
+      codec: msgpackCodec,
+      side: "responder",
+      signal,
+      maxMessageSize,
+    });
+    void serve({ mux }, httpHandler).then((stop) => {
       partStops.set(p.identity, stop);
     });
   };

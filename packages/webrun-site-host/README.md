@@ -26,7 +26,7 @@ of host code and the same handler also runs under Node, Deno, Bun, Workers or a
 pnpm add @statewalker/webrun-site-host @statewalker/webrun-files
 ```
 
-`@statewalker/webrun-files` is a **peer dependency** (`^0.9.0 || ^0.10.0`).
+`@statewalker/webrun-files` is a **peer dependency** (`^0.12.0`).
 Runtime dependencies: `@statewalker/webrun-site-builder`,
 `@statewalker/webrun-http-browser` (the ServiceWorker adapter) and
 `@statewalker/webrun-files-mem`.
@@ -43,6 +43,11 @@ The ServiceWorker runtime ships in `@statewalker/webrun-http-browser` as the
 `setServiceWorkerUrl`). Serving it from the origin root gives the worker scope
 `/`; the demo apps in this repository do it with a small Vite plugin that also
 sends `Service-Worker-Allowed: /`.
+
+The page side of the adapter comes from this package's own
+`@statewalker/webrun-http-browser` dependency (`^0.16.0`), so serve
+`sw-worker.js` from the same line: the page and the worker talk over
+webrun-rpc's port stack, and both ends must run the same version of it.
 
 ### Host a handler
 
