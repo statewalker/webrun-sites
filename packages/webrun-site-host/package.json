@@ -36,6 +36,7 @@
     "build": "rimraf dist && rolldown -c && tsc --emitDeclarationOnly --declaration",
     "prepack": "pnpm run build",
     "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "lint": "biome check src tests",
     "prepublishOnly": "pnpm run build"
   },
