@@ -3,7 +3,6 @@
  * a race found while analysing them.
  */
 import { DatabaseSync } from "node:sqlite";
-import { NodeSqlDriver } from "@statewalker/webrun-files-sqlite";
 import { describe, expect, it } from "vitest";
 import {
   BuildEngine,
@@ -14,6 +13,7 @@ import {
   MemKV,
   SqlKV,
 } from "../src/index.js";
+import { NodeSqlDriver } from "./node-sql-driver.js";
 
 const log = (builders: BuilderDef[], out: string[]): BuilderDef[] =>
   builders.map((c) => ({

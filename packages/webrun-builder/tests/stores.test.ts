@@ -1,8 +1,8 @@
 import { DatabaseSync } from "node:sqlite";
 import { MemFilesApi } from "@statewalker/webrun-files-mem";
-import { NodeSqlDriver } from "@statewalker/webrun-files-sqlite";
 import { describe, expect, it } from "vitest";
 import { BuildEngine, type BuilderDef, FilesKV, type KV, MemKV, SqlKV } from "../src/index.js";
+import { NodeSqlDriver } from "./node-sql-driver.js";
 
 const stores: [string, () => Promise<KV>][] = [
   ["MemKV", async () => new MemKV()],

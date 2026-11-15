@@ -9,7 +9,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { BuildEngine, FilesKV, SqlKV } from "@statewalker/webrun-builder";
 import { MemFilesApi } from "@statewalker/webrun-files-mem";
-import { NodeSqlDriver } from "@statewalker/webrun-files-sqlite";
 import { describe, expect, it } from "vitest";
 import { recorded, recorder, rng, snapshot } from "../src/core/fixtures.js";
 import { CrashError, CrashingKV, type KV, MemKV } from "../src/core/kv.js";
@@ -19,6 +18,7 @@ import { CursorEngine } from "../src/prototypes/cursors.js";
 import { NaiveEngine } from "../src/prototypes/naive.js";
 import { QueueEngine } from "../src/prototypes/queue.js";
 import { TraceEngine } from "../src/prototypes/traces.js";
+import { NodeSqlDriver } from "./node-sql-driver.js";
 
 const SCALE = Number(process.env.MASSIVE_SCALE ?? 1);
 const n = (x: number) => Math.max(1, Math.round(x * SCALE));

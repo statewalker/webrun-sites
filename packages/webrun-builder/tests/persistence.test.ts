@@ -1,6 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
 import { MemFilesApi } from "@statewalker/webrun-files-mem";
-import { NodeSqlDriver } from "@statewalker/webrun-files-sqlite";
 import { describe, expect, it } from "vitest";
 import {
   type BuilderDef,
@@ -9,6 +8,7 @@ import {
   openStore,
   type PersistenceConfig,
 } from "../src/index.js";
+import { NodeSqlDriver } from "./node-sql-driver.js";
 
 const upper: BuilderDef = {
   id: "upper",

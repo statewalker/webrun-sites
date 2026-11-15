@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { BuildEngine, SqlKV } from "@statewalker/webrun-builder";
-import { NodeSqlDriver } from "@statewalker/webrun-files-sqlite";
 import { defineConformance } from "./conformance.js";
+import { NodeSqlDriver } from "./node-sql-driver.js";
 
 // The real implementation (packages/webrun-builder) against the same suite:
 // one task per commit, the default group commit, concurrent execution, SQLite.

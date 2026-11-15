@@ -1,9 +1,9 @@
 import { emptyMetrics, type KV, type KvMetrics, type KvWrite } from "./kv.js";
 
 /**
- * The SQL port this store needs — structurally the `SqlDriver` of
- * `@statewalker/webrun-files-sqlite` (node:sqlite, Durable Object storage, D1),
- * declared here so the engine carries no dependency on it.
+ * The SQL port this store needs: `all`, `run` and a batched `transaction`, small
+ * enough to implement over node:sqlite, Durable Object storage or D1. Declared
+ * here so the engine carries no dependency on a database package.
  */
 export interface SqlDriver {
   all<T = Record<string, unknown>>(sql: string, ...params: unknown[]): T[] | Promise<T[]>;
@@ -12,8 +12,8 @@ export interface SqlDriver {
 }
 
 /**
- * The KV port over the `SqlDriver` of `@statewalker/webrun-files-sqlite`
- * (node:sqlite, Durable Object storage, D1): one `WITHOUT ROWID` table. Prefix
+ * The KV port over a {@link SqlDriver} (node:sqlite, Durable Object storage,
+ * D1): one `WITHOUT ROWID` table. Prefix
  * scans are range scans on the primary key, read in pages; a commit is one
  * driver transaction. Counts the same metrics as `MemKV`.
  */

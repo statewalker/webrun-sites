@@ -5,9 +5,9 @@
 import { DatabaseSync } from "node:sqlite";
 import { writeText } from "@statewalker/webrun-files";
 import { MemFilesApi } from "@statewalker/webrun-files-mem";
-import { NodeSqlDriver } from "@statewalker/webrun-files-sqlite";
 import { describe, expect, it } from "vitest";
 import { BuildEngine, type BuilderDef, FilesKV, MemKV, SqlKV } from "../src/index.js";
+import { NodeSqlDriver } from "./node-sql-driver.js";
 
 describe("review: verify, reset and incremental reduce", () => {
   it("B1: map task that list()s a collection is skipped by verify-before-execute when that collection changes", async () => {
