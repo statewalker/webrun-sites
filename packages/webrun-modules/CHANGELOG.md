@@ -1,5 +1,18 @@
 # @statewalker/webrun-modules
 
+## 0.4.0
+
+### Minor Changes
+
+- 8c72b59: A missing module file fails instead of becoming an empty module (#9). A package whose manifest (`exports`, `browser`, `module` or `main`) names a file it does not ship is rejected at resolution, with the package, the subpath and the declared target in the error. New option `onMissingFile(id)` on `newModuleServer` and `newProjectBuild`: a returned string is used as the missing file's source; `undefined`, or no option, keeps the failure. Builds that emitted empty modules for missing files now fail.
+
+### Patch Changes
+
+- e45095a: `proxyId` (through `depsRoot`) throws for an importer id that is neither a project id (`~/…`) nor a package id (`{name}@{version}/…`), instead of returning a rootless proxy path that the routing guards do not recognise (#5). A proxy's accumulated shape is replaced, never mutated, when it grows, so a reader holding an earlier entry keeps a consistent snapshot.
+- 908c8a4: A proxy whose `.shape.json` sidecar is missing or corrupt (a cache from before the sidecars, or one edited by hand) is seeded from the exports of its emitted body, so the first build against such a cache no longer narrows a shared `host` proxy to the importers it walks (#3).
+  
+  A `host` proxy exports a reserved-word name (`delete`) in alias form instead of `export const delete`, which did not parse.
+
 ## 0.3.6
 
 ### Patch Changes

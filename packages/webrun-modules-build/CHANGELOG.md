@@ -1,5 +1,20 @@
 # @statewalker/webrun-modules-build
 
+## 0.5.0
+
+### Minor Changes
+
+- 8c72b59: A missing module file fails instead of becoming an empty module (#9). A package whose manifest (`exports`, `browser`, `module` or `main`) names a file it does not ship is rejected at resolution, with the package, the subpath and the declared target in the error. New option `onMissingFile(id)` on `newModuleServer` and `newProjectBuild`: a returned string is used as the missing file's source; `undefined`, or no option, keeps the failure. Builds that emitted empty modules for missing files now fail.
+
+### Patch Changes
+
+- Updated dependencies
+- Updated dependencies [e45095a]
+- Updated dependencies [8c72b59]
+- Updated dependencies [908c8a4]
+  - @statewalker/webrun-tailwind@0.3.0
+  - @statewalker/webrun-modules@0.4.0
+
 ## 0.4.1
 
 ### Patch Changes
