@@ -45,7 +45,7 @@ The ServiceWorker runtime ships in `@statewalker/webrun-http-browser` as the
 sends `Service-Worker-Allowed: /`.
 
 The page side of the adapter comes from this package's own
-`@statewalker/webrun-http-browser` dependency (`^0.16.0`), so serve
+`@statewalker/webrun-http-browser` dependency (`^0.17.0`), so serve
 `sw-worker.js` from the same line: the page and the worker talk over
 webrun-rpc's port stack, and both ends must run the same version of it.
 
