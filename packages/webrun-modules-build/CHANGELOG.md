@@ -1,5 +1,11 @@
 # @statewalker/webrun-modules-build
 
+## 0.7.0
+
+### Minor Changes
+
+- b0fbcf8: `ProjectBuild.prune({ entries? })` removes every `~deps` proxy, with its sidecars, that the entry points cannot reach (#2). Without `entries`, the public entry points of the project's `package.json` are used (`main`, `module`, a string `browser`, every string target of `exports`).
+
 ## 0.6.0
 
 ### Minor Changes
