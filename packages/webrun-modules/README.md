@@ -165,6 +165,7 @@ const app = await server.resolve({ url: "/src/app.ts" }); // → importable URL
 | `globals`   | —                        | Extends/overrides the injectable free-global allowlist. |
 | `resolveEndpoint` | —                  | Swaps the linker deciding how a bare specifier binds. |
 | `cors`      | —                        | `true` → permissive CORS on every response; a record → exactly those headers. |
+| `onMissingFile` | —                    | `(id) => string \| undefined` (sync or async): the source of a module file that does not exist. Absent, a missing file is a 404 and a manifest entry naming an unshipped file is rejected with the package and the target named. |
 
 ### The `ModuleServer` interface
 

@@ -6,6 +6,7 @@ import type {
   EndpointResolver,
   HostRegistry,
   Lockfile,
+  MissingFileHandler,
   ModuleImport,
   ModuleTarget,
   Source,
@@ -133,6 +134,9 @@ export interface PreprocessContext {
    * content-hash hook so shared/interior nodes aren't re-transformed once per path.
    */
   skipTransform?(id: string, source: string): Promise<boolean>;
+  /** Supplies the source of a module file that does not exist (see
+   *  `ModuleServerOptions.onMissingFile`). Absent ⇒ a missing file throws. */
+  onMissingFile?: MissingFileHandler;
 }
 
 /** Project ids (`~/…`) are served verbatim; package ids get the `depsPath` prefix.

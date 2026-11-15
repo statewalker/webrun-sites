@@ -54,6 +54,7 @@ export type {
   HostRegistry,
   LoadedPackage,
   Lockfile,
+  MissingFileHandler,
   ModuleDescriptor,
   ModuleImport,
   ModuleRef,

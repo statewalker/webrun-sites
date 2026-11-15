@@ -5,7 +5,7 @@ import { newDefaultEndpointResolver } from "../deps/endpoint-resolver.js";
 import { HOST_REGISTRY_KEY } from "../deps/host-registry.js";
 import { proxyBody, proxyId } from "../deps/proxy.js";
 import { nodeBuiltinName, resolveNodeBuiltin } from "../resolution/node-builtins.js";
-import { resolveEntry } from "../resolution/resolve-entry.js";
+import { resolveEntryClaim } from "../resolution/resolve-entry.js";
 import { parseSpecifier, relativeUrl } from "../server/specifiers.js";
 import { analyze, detectFormat } from "../transform/index.js";
 import type { EndpointBinding, EndpointResolver, ModuleImport, PackageManifest } from "../types.js";
@@ -123,11 +123,21 @@ export async function ensureRawByKey(pkgKey: string, ctx: PreprocessContext): Pr
 
 /** Ensure a package's raw files + manifest are cached; return its pinned id. */
 export async function ensurePackage(
-  ref: { pkg: string; version?: string; subpath?: string },
+  ref: {
+    pkg: string;
+    version?: string;
+    subpath?: string;
+    /** Check that the manifest's entry for `subpath` is shipped (default `true`).
+     *  `false` for a caller that only needs the version pinned and the files cached
+     *  (`listPackageFiles`), not the entry. */
+    checkEntry?: boolean;
+  },
   ctx: PreprocessContext,
 ): Promise<{ name: string; version: string; file: string; id: string; manifest: PackageManifest }> {
   const name = ref.pkg;
-  return singleFlight(ctx, `pkg:${name}@${ref.version ?? ""}#${ref.subpath ?? ""}`, async () => {
+  const checkEntry = ref.checkEntry ?? true;
+  const flight = `pkg:${name}@${ref.version ?? ""}#${ref.subpath ?? ""}${checkEntry ? "" : "!nocheck"}`;
+  return singleFlight(ctx, flight, async () => {
     const locked = ctx.lock[name];
     let version: string;
     let manifest: PackageManifest;
@@ -143,8 +153,26 @@ export async function ensurePackage(
       manifest = loaded.manifest;
       if (!locked) ctx.lock[name] = version;
     }
-    const entry = resolveEntry(manifest, ref.subpath, ctx.target);
+    const { file: entry, declared } = resolveEntryClaim(manifest, ref.subpath, ctx.target);
     const file = await resolveRawFile(`${name}@${version}`, entry, ctx); // real ext/index
+    // The manifest's own claim, checked: a file it names that the package does not
+    // ship is a malformed manifest, reported as such rather than surfacing later as
+    // a 404 (or an empty module) that looks like a webrun-modules fault. A guessed
+    // entry (`declared: false`, e.g. a placeholder package with no `main`) is left to
+    // `loadRaw`, so an optional `require` of it still fails only at its call site.
+    // With `onMissingFile` set, `loadRaw` consults it instead.
+    if (
+      checkEntry &&
+      declared &&
+      !ctx.onMissingFile &&
+      (await ctx.cache.stats(`/raw/${name}@${version}/${file}`))?.kind !== "file"
+    ) {
+      const subpath = ref.subpath ? `./${ref.subpath.replace(/^\.?\//, "")}` : ".";
+      throw new ModuleResolveError(
+        { pkg: name, version, subpath: ref.subpath },
+        `${name}@${version}: the manifest maps "${subpath}" to "./${entry}", which the package does not ship`,
+      );
+    }
     return { name, version, file, id: `${name}@${version}/${file}`, manifest };
   });
 }
@@ -623,11 +651,20 @@ export async function loadRaw(
   // Reading a missing path (or a directory) yields zero bytes rather than an
   // error, which would transform into an EMPTY module served 200 — the browser
   // then fails far away at "does not provide an export named …". A miss is a miss.
+  // `ctx.onMissingFile` may supply the source instead; without it, or when it
+  // returns `undefined`, the miss throws.
+  const missing = async (path: string, manifest?: PackageManifest) => {
+    const source = await ctx.onMissingFile?.(id);
+    if (typeof source !== "string") throw new ModuleResolveError({ url: id }, "no such file");
+    return { path, source, format: detectFormat(path, source, manifest) };
+  };
   if (id.startsWith("~/")) {
-    if (!ctx.files) throw new ModuleResolveError({ url: id }, "no project FilesApi");
     const path = `/${id.slice(2)}`;
-    if ((await ctx.files.stats(path))?.kind !== "file")
-      throw new ModuleResolveError({ url: id }, "no such file");
+    if (!ctx.files || (await ctx.files.stats(path))?.kind !== "file") {
+      if (!ctx.files && !ctx.onMissingFile)
+        throw new ModuleResolveError({ url: id }, "no project FilesApi");
+      return missing(path);
+    }
     const source = await readText(ctx.files, path);
     return { path, source, format: detectFormat(path, source) };
   }
@@ -636,10 +673,10 @@ export async function loadRaw(
   const [, pkgKey, rawFile] = m;
   await ensureRawByKey(pkgKey, ctx);
   const file = await resolveRawFile(pkgKey, rawFile, ctx);
-  if ((await ctx.cache.stats(`/raw/${pkgKey}/${file}`))?.kind !== "file")
-    throw new ModuleResolveError({ url: id }, "no such file");
-  const source = await readText(ctx.cache, `/raw/${pkgKey}/${file}`);
   const manifest = await cachedManifest(pkgKey, ctx).catch(() => undefined);
+  if ((await ctx.cache.stats(`/raw/${pkgKey}/${file}`))?.kind !== "file")
+    return missing(`/${pkgKey}/${file}`, manifest);
+  const source = await readText(ctx.cache, `/raw/${pkgKey}/${file}`);
   return { path: `/${pkgKey}/${file}`, source, format: detectFormat(file, source, manifest) };
 }
 

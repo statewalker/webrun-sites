@@ -136,6 +136,13 @@ export interface CssTransform {
   transform(file: CssFile, rewrite: (specifier: string) => string): Promise<CssTransformResult>;
 }
 
+/**
+ * Called with the canonical id (`~/src/x.js`, `pkg@1.0.0/dist/x.js`) of a module
+ * file that does not exist. A string is used as that file's source; `undefined`
+ * keeps the default: the miss fails (a 404 from the server, an error from a build).
+ */
+export type MissingFileHandler = (id: string) => string | undefined | Promise<string | undefined>;
+
 export interface ModuleServerOptions {
   /** Injected cache — NodeFilesApi / browser-OPFS / MemFilesApi. Never node:fs. */
   cache: FilesApi;
@@ -172,6 +179,11 @@ export interface ModuleServerOptions {
    *  404s, with `OPTIONS` answered 204. `true` → permissive defaults (`*`,
    *  GET/HEAD/OPTIONS); a record → exactly those headers. Omitted → none. */
   cors?: boolean | Record<string, string>;
+  /** Escape hatch for a module file that does not exist: supply its source rather
+   *  than fail. Absent by default, so a missing file is a 404, never an empty
+   *  module. With it set, a manifest entry naming an unshipped file is also left
+   *  to this hook rather than rejected at resolution. */
+  onMissingFile?: MissingFileHandler;
 }
 
 export interface ModuleServer {

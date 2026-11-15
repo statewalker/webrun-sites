@@ -32,6 +32,20 @@ export function resolveEntry(
   subpath: string | undefined,
   target: ModuleTarget,
 ): string {
+  return resolveEntryClaim(manifest, subpath, target).file;
+}
+
+/**
+ * {@link resolveEntry}, plus whether the manifest itself names the file
+ * (`declared`: an `exports` target or a `browser`/`module`/`main` field) or it is
+ * the raw subpath / `index.js` guess used when the manifest says nothing. A
+ * declared file that the package does not ship is a malformed manifest.
+ */
+export function resolveEntryClaim(
+  manifest: PackageManifest,
+  subpath: string | undefined,
+  target: ModuleTarget,
+): { file: string; declared: boolean } {
   const browser = target === "browser";
   const clean = (subpath ?? "").replace(/^\.?\//, "");
   const entry = clean ? `./${clean}` : ".";
@@ -43,7 +57,7 @@ export function resolveEntry(
     const out =
       tryResolve(manifest, entry, { browser, conditions }) ??
       tryResolve(manifest, entry, { browser, conditions, require: true });
-    if (out?.length) return norm(out[0]);
+    if (out?.length) return { file: norm(out[0]), declared: true };
     // exports present but subpath not exported: fall through to the raw path.
   }
 
@@ -52,7 +66,7 @@ export function resolveEntry(
       browser,
       fields: browser ? ["browser", "module", "main"] : ["module", "main"],
     });
-    if (typeof leg === "string") return norm(leg);
+    if (typeof leg === "string") return { file: norm(leg), declared: true };
     // A `browser` field has two meanings (browserify): a STRING is the browser
     // entry, an OBJECT is a per-module substitution MAP — and `legacy` hands the
     // map back verbatim, which is not an entry. Treating that as "no legacy main"
@@ -66,7 +80,7 @@ export function resolveEntry(
         // `legacy` with a STRING `browser` looks the entry up in the map and
         // returns the entry itself when the map has nothing to say about it.
         const mapped = legacy(manifest, { browser: base, fields: ["browser"] });
-        return norm(typeof mapped === "string" ? mapped : base);
+        return { file: norm(typeof mapped === "string" ? mapped : base), declared: true };
       }
     }
     // `exports` present but neither `.` nor a legacy main resolves: the package has
@@ -77,5 +91,5 @@ export function resolveEntry(
     }
   }
 
-  return clean || "index.js";
+  return { file: clean || "index.js", declared: false };
 }
