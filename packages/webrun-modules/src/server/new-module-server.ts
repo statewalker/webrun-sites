@@ -112,6 +112,7 @@ export function newModuleServer(options: ModuleServerOptions): ModuleServer {
     transforms: newDefaultTransformRegistry(),
     policy: undefined as unknown as UrlPolicy,
     resolveEndpoint: undefined as unknown as EndpointResolver,
+    onMissingFile: options.onMissingFile,
   };
   ctx.policy = makeKeepExtPolicy(ctx);
   ctx.resolveEndpoint = options.resolveEndpoint ?? makeDefaultEndpointResolver(ctx);
@@ -197,7 +198,11 @@ export function newModuleServer(options: ModuleServerOptions): ModuleServer {
     async listPackageFiles(ref: ModuleRef): Promise<string[]> {
       await init();
       if ("url" in ref) throw new ModuleResolveError(ref, "not a package reference");
-      const { name, version } = await ensurePackage({ pkg: ref.pkg, version: ref.version }, ctx);
+      const { name, version } = await ensurePackage(
+        // Only the files are wanted: a stale root entry must not hide them.
+        { pkg: ref.pkg, version: ref.version, checkEntry: false },
+        ctx,
+      );
       const key = `${name}@${version}`;
       const files: string[] = [];
       for await (const info of cache.list(`/raw/${key}`, { recursive: true })) {

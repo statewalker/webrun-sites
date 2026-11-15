@@ -9,6 +9,14 @@ describe("depsRoot", () => {
     expect(depsRoot("react-dom@19.0.0/cjs/impl.js")).toBe("react-dom@19.0.0");
     expect(depsRoot("@scope/pkg@1.2.3/lib/a.js")).toBe("@scope/pkg@1.2.3");
   });
+
+  it("throws for an id of neither form instead of returning an unroutable root (#5)", () => {
+    // A rootless proxy id (`~deps/react/index.js`) lacks the `/~deps/` both routing
+    // guards test for, so it would be walked as a real module and served as a 500.
+    expect(() => depsRoot("react/index.js")).toThrow(/react\/index\.js/);
+    expect(() => depsRoot("")).toThrow();
+    expect(() => proxyId("not-a-module-id", "react")).toThrow(/not-a-module-id/);
+  });
 });
 
 describe("depsEntryPath", () => {

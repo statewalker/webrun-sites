@@ -53,6 +53,18 @@ class DelayFirstWriteFilesApi implements FilesApi {
   }
 }
 
+/** A `MemFilesApi` counting `write` calls per path, so a test can tell "skipped
+ *  the write" from "wrote the same bytes again" (#4). */
+function countingFiles(): MemFilesApi & { writes: Map<string, number> } {
+  const files = Object.assign(new MemFilesApi(), { writes: new Map<string, number>() });
+  const write = files.write.bind(files);
+  files.write = (path, content) => {
+    files.writes.set(path, (files.writes.get(path) ?? 0) + 1);
+    return write(path, content);
+  };
+  return files;
+}
+
 /** A partial context carrying only what the proxy writers touch. The codebase
  *  already casts partial contexts in tests (see webrun-modules-build's
  *  url-policy.test.ts), because building a full context needs a network source. */
@@ -98,13 +110,44 @@ describe("proxy shape accumulation", () => {
   });
 
   it("does not rewrite when a later importer adds nothing", async () => {
-    const cache = new MemFilesApi();
+    // Counts writes: comparing the bytes cannot tell a skipped write from a
+    // redundant re-emit of the same body (#4).
+    const cache = countingFiles();
     const ctx = mkCtx(cache);
+    const path = "/t/browser/~/~deps/react/index.js";
     const imp = { names: ["useState"], hasDefault: false, hasNamespace: false };
     await ensureProxy(PID, HOST, imp, ctx);
-    const first = await readText(cache, "/t/browser/~/~deps/react/index.js");
+    expect(cache.writes.get(path)).toBe(1);
     await ensureProxy(PID, HOST, { ...imp, names: ["useState"] }, ctx);
-    expect(await readText(cache, "/t/browser/~/~deps/react/index.js")).toBe(first);
+    expect(cache.writes.get(path)).toBe(1);
+    // …while a later importer that DOES add a name rewrites it.
+    await ensureProxy(PID, HOST, { ...imp, names: ["useEffect"] }, ctx);
+    expect(cache.writes.get(path)).toBe(2);
+  });
+
+  it("never mutates a shape a reader already holds (#5)", async () => {
+    const ctx = mkCtx(new MemFilesApi());
+    await ensureProxy(
+      PID,
+      HOST,
+      { names: ["useState"], hasDefault: false, hasNamespace: false },
+      ctx,
+    );
+    const held = ctx.proxies.get(PID);
+    const heldNames = held?.imp.names;
+    await ensureProxy(
+      PID,
+      HOST,
+      { names: ["useEffect"], hasDefault: true, hasNamespace: false },
+      ctx,
+    );
+    expect(held?.imp).toEqual({ names: ["useState"], hasDefault: false, hasNamespace: false });
+    expect(heldNames).toEqual(["useState"]);
+    expect(ctx.proxies.get(PID)?.imp).toEqual({
+      names: ["useState", "useEffect"],
+      hasDefault: true,
+      hasNamespace: false,
+    });
   });
 
   it("keeps both names when two importers race on one proxy id", async () => {

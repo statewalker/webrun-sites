@@ -15,12 +15,20 @@ const RESERVED = new Set(
 );
 
 /** The module root that owns a `~deps/`: the project root (`~`) for authored
- *  sources, the package root (`{name}@{version}`) for npm files. The `""` fallback
- *  is defensive — every id reaching here is one of those two forms, because they
- *  are the only forms `loadRaw` accepts. */
+ *  sources, the package root (`{name}@{version}`) for npm files. Every id reaching
+ *  here is one of those two forms, the only ones `loadRaw` accepts; any other id
+ *  throws. A rootless proxy id (`~deps/react/index.js`) would lack the `/~deps/`
+ *  segment both routing guards test for, so it would be walked as a real module
+ *  and served as a 500 instead of failing here, at its cause. */
 export function depsRoot(importerId: string): string {
   if (importerId.startsWith("~/")) return "~";
-  return importerId.match(/^((?:@[^/]+\/)?[^/]+@[^/]+)\//)?.[1] ?? "";
+  const root = importerId.match(/^((?:@[^/]+\/)?[^/]+@[^/]+)\//)?.[1];
+  if (root === undefined) {
+    throw new Error(
+      `depsRoot: ${JSON.stringify(importerId)} is neither a project id (~/…) nor a package id ({name}@{version}/…)`,
+    );
+  }
+  return root;
 }
 
 /**
@@ -43,9 +51,7 @@ export function depsEntryPath(specifier: string): string {
 /** Proxy id for one external specifier, in its importer's module-root deps folder.
  *  Every file of a module shares one proxy per specifier. */
 export function proxyId(importerId: string, specifier: string, depsFolder = "~deps"): string {
-  const root = depsRoot(importerId);
-  const prefix = root ? `${root}/` : "";
-  return `${prefix}${depsFolder}/${depsEntryPath(specifier)}`;
+  return `${depsRoot(importerId)}/${depsFolder}/${depsEntryPath(specifier)}`;
 }
 
 /**

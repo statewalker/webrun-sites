@@ -231,7 +231,10 @@ describe("~deps proxy layer", () => {
     expect(files.some((u) => u.includes("react@"))).toBe(false);
   });
 
-  it("class-as-adapter-key: two importers share one root proxy, so the class is one reference", async () => {
+  // Proves the shared root proxy PATH, not shape merging: both importers use the
+  // same shape (`import { K }`). Merging is covered by the React test above, whose
+  // importers contribute different names (#4).
+  it("class-as-adapter-key: two importers of a provided class resolve to one root proxy", async () => {
     class K {}
     const registry = newHostRegistry({ "@app/keys": { K } });
     const p = new MemFilesApi();

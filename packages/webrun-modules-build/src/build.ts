@@ -6,6 +6,7 @@ import {
   defaultGlobals,
   detectInputType,
   type EndpointResolver,
+  type MissingFileHandler,
   type ModuleTarget,
   makeDefaultEndpointResolver,
   newDefaultCssTransform,
@@ -40,6 +41,10 @@ export interface ProjectBuildOptions {
   css?: CssTransform;
   /** Name of the per-module-root folder holding dependency proxies (default `"~deps"`). */
   depsFolder?: string;
+  /** Escape hatch for a module file that does not exist: supply its source rather
+   *  than fail the build (see `ModuleServerOptions.onMissingFile`). Absent by
+   *  default, so a missing file fails the build, never emits an empty module. */
+  onMissingFile?: MissingFileHandler;
 }
 
 /** A prepared batch build over a project. */
@@ -94,6 +99,7 @@ export function newProjectBuild(opts: ProjectBuildOptions): ProjectBuild {
     transforms: newDefaultTransformRegistry(),
     policy: undefined as unknown as UrlPolicy,
     resolveEndpoint: undefined as unknown as EndpointResolver,
+    onMissingFile: opts.onMissingFile,
   };
   ctx.policy = makeExtMapPolicy(ctx);
   ctx.resolveEndpoint = makeDefaultEndpointResolver(ctx);
