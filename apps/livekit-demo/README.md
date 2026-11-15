@@ -14,8 +14,8 @@ replacing the libp2p Circuit Relay v2 + WebRTC link.
 | --- | --- | --- |
 | `livekit-server` (Docker, `livekit-server --dev`) | LiveKit SFU + signalling | `ws://localhost:7880` (+ 7881/tcp, 7882/udp) |
 | `token-service/server.ts` | Node HTTP service; signs JWTs with the dev API key | `http://localhost:9091/token` |
-| `server-page/` | Browser app: joins the LiveKit room as `site-server`, and for each remote participant registers the same `SiteHandler` with `serve({ room, peerIdentity })` from `@statewalker/webrun-streams-livekit`, wrapped in `serveFetchOverDuplex` | `http://localhost:5275` |
-| `client-page/` | Browser app: joins the same room with a random identity, opens a `Duplex` to `site-server` with `connect({ room, peerIdentity })`, and exposes the remote site via `HostedSiteBuilder` + SW, whose handler is `(req) => fetchOverDuplex(call, req)` | `http://localhost:5276` |
+| `server-page/` | Browser app: joins the LiveKit room as `site-server`, and for each remote participant registers the same `SiteHandler`, wrapped in `serveFetchOverDuplex`, with `webrun-rpc`'s `serve` over `overPipe(messageTargetOverLiveKit(room, identity))` | `http://localhost:5275` |
+| `client-page/` | Browser app: joins the same room with a random identity, opens a `Duplex` to `site-server` with `webrun-rpc`'s `connect` over `overPipe(messageTargetOverLiveKit(room, "site-server"))`, and exposes the remote site via `HostedSiteBuilder` + SW, whose handler is `(req) => fetchOverDuplex(call, req)` | `http://localhost:5276` |
 
 Data flows peer-to-peer over LiveKit's per-participant data channel
 (`localParticipant.publishData` with `destinationIdentities`).
@@ -94,8 +94,9 @@ The launcher:
   publishing a multiaddr.
 - Identity is the routing primitive (instead of a peer id). Outbound data
   packets carry `destinationIdentities`; inbound packets are filtered by
-  sender identity inside `byteChannelFromLiveKit`, on top of which
-  `emulateMux` provides the multi-stream layer.
+  sender identity inside `messageTargetOverLiveKit`, on top of which
+  `webrun-rpc`'s port stack (`overPipe` + `msgpackCodec`) provides the
+  multi-stream layer, one port per call.
 
 ## What will surprise you
 
