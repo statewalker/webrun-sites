@@ -13,6 +13,7 @@ jobs:
       package-checks: true
       secret-scan: true
       release-path: true
+      api-diff: true
 
   # The lockfile-only pull request that .github/workflows/statewalker-update.yml opens: merged
   # once every other check on it passes, after checking it changes pnpm-lock.yaml alone
