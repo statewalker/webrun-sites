@@ -1,5 +1,20 @@
 # @statewalker/webrun-tailwind
 
+## 0.3.0
+
+### Minor Changes
+
+- Release of the changes since the last published version:
+  
+  - @statewalker/webrun-modules crosses a breaking line
+
+### Patch Changes
+
+- Updated dependencies [e45095a]
+- Updated dependencies [8c72b59]
+- Updated dependencies [908c8a4]
+  - @statewalker/webrun-modules@0.4.0
+
 ## 0.2.4
 
 ### Patch Changes
