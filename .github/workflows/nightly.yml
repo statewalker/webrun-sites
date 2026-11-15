@@ -1,0 +1,19 @@
+name: Nightly
+
+# The suites pull-request CI does not run (browsers, end to end), every night, with the shared
+# nightly workflow (statewalker/statewalker-ci, "Nightly browser and end-to-end suites"). A failure
+# opens one `bug` + `ci-baseline` issue here; later failures comment on it.
+on:
+  schedule:
+    - cron: "41 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  nightly:
+    uses: statewalker/statewalker-ci/.github/workflows/nightly.yml@main
+    with:
+      setup: pnpm --filter @statewalker/webrun-bundler exec playwright install --with-deps chromium

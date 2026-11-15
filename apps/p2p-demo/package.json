@@ -23,7 +23,8 @@
     "build": "pnpm run build:server-page && pnpm run build:client-page",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "e2e": "node e2e/browser-to-browser.mjs"
+    "e2e": "node e2e/browser-to-browser.mjs",
+    "test:e2e": "node e2e/browser-to-browser.mjs"
   },
   "dependencies": {
     "@chainsafe/libp2p-noise": "catalog:",
