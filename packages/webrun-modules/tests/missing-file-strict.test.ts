@@ -119,4 +119,12 @@ describe("missing files fail (webrun-sites#9)", () => {
     const server = newModuleServer({ cache: new MemFilesApi(), sources: [ghost] });
     await expect(server.resolve({ pkg: "ghost" })).resolves.toBeDefined();
   });
+
+  it("still lists the files of a package whose main is not shipped", async () => {
+    // Only the files are wanted; the subpaths of such a package still serve.
+    const assets = source("assets", { main: "index.js" }, { "/theme.css": "a{}", "/util.js": "" });
+    const server = newModuleServer({ cache: new MemFilesApi(), sources: [assets] });
+    const files = await server.listPackageFiles({ pkg: "assets" });
+    expect(files).toEqual(expect.arrayContaining(["theme.css", "util.js"]));
+  });
 });

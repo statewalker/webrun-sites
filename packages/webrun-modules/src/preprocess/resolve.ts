@@ -123,11 +123,21 @@ export async function ensureRawByKey(pkgKey: string, ctx: PreprocessContext): Pr
 
 /** Ensure a package's raw files + manifest are cached; return its pinned id. */
 export async function ensurePackage(
-  ref: { pkg: string; version?: string; subpath?: string },
+  ref: {
+    pkg: string;
+    version?: string;
+    subpath?: string;
+    /** Check that the manifest's entry for `subpath` is shipped (default `true`).
+     *  `false` for a caller that only needs the version pinned and the files cached
+     *  (`listPackageFiles`), not the entry. */
+    checkEntry?: boolean;
+  },
   ctx: PreprocessContext,
 ): Promise<{ name: string; version: string; file: string; id: string; manifest: PackageManifest }> {
   const name = ref.pkg;
-  return singleFlight(ctx, `pkg:${name}@${ref.version ?? ""}#${ref.subpath ?? ""}`, async () => {
+  const checkEntry = ref.checkEntry ?? true;
+  const flight = `pkg:${name}@${ref.version ?? ""}#${ref.subpath ?? ""}${checkEntry ? "" : "!nocheck"}`;
+  return singleFlight(ctx, flight, async () => {
     const locked = ctx.lock[name];
     let version: string;
     let manifest: PackageManifest;
@@ -152,6 +162,7 @@ export async function ensurePackage(
     // `loadRaw`, so an optional `require` of it still fails only at its call site.
     // With `onMissingFile` set, `loadRaw` consults it instead.
     if (
+      checkEntry &&
       declared &&
       !ctx.onMissingFile &&
       (await ctx.cache.stats(`/raw/${name}@${version}/${file}`))?.kind !== "file"
