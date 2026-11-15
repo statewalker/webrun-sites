@@ -145,4 +145,49 @@ describe("ProjectBuild.prune (#2)", () => {
     await expect(build.prune({ entries: ["missing.ts"] })).rejects.toThrow(/missing\.ts/);
     expect(await cache.exists(GREET)).toBe(true);
   });
+
+  it("skips type declarations in exports (types condition, .d.ts targets)", async () => {
+    const files = await project({
+      name: "app",
+      exports: { ".": { types: "./dist/index.d.ts", import: "./main.ts" } },
+      types: "./dist/index.d.ts",
+    });
+    const cache = new MemFilesApi();
+    const build = newProjectBuild({ project: files, cache, sources: [memSource(PKGS)] });
+    await build.build();
+
+    const { entries } = await build.prune();
+
+    expect(entries).toEqual(["main.ts"]);
+    expect(await cache.exists(GREET)).toBe(true);
+  });
+
+  it("the next build restores the proxies of a pruned module outside the closure", async () => {
+    // extra.ts is not a public entry, so prune removes its proxy; its emitted
+    // module still imports it, and the next build must re-emit it rather than
+    // skip the unchanged source and leave a broken import behind.
+    const files = await project({ name: "app", main: "./main.ts" });
+    const cache = new MemFilesApi();
+    const build = newProjectBuild({ project: files, cache, sources: [memSource(PKGS)] });
+    await build.build();
+    await build.prune();
+    expect(await cache.exists(OTHER)).toBe(false);
+
+    await build.build();
+
+    expect(await cache.exists(OTHER)).toBe(true);
+  });
+
+  it("also restores them from a fresh ProjectBuild over the same project", async () => {
+    const files = await project({ name: "app", main: "./main.ts" });
+    const cache = new MemFilesApi();
+    const sources = [memSource(PKGS)];
+    await newProjectBuild({ project: files, cache, sources }).build();
+    await newProjectBuild({ project: files, cache, sources }).prune();
+    expect(await cache.exists(OTHER)).toBe(false);
+
+    await newProjectBuild({ project: files, cache, sources }).build();
+
+    expect(await cache.exists(OTHER)).toBe(true);
+  });
 });

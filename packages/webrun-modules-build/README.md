@@ -108,7 +108,8 @@ the walk did not reach, with its sidecars (`.shape.json`, `.hash`,
 `/raw/` package cache stay. It throws, removing nothing, when there are no entry
 points or one is not a project file. A module the entry points do not import
 (another page, a worker started by URL) loses its proxies unless it is listed in
-`entries`.
+`entries`; prune queues it, so the next `build()` re-emits them. Type
+declarations (a `types` condition, `.d.ts` targets) are not entry points.
 
 ### `makeExtMapPolicy`: the URL policy on its own
 

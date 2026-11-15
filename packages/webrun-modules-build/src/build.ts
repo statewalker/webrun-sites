@@ -1,4 +1,4 @@
-import { BuildEngine, FilesKV, scanSources } from "@statewalker/webrun-builder";
+import { BuildEngine, FilesKV, SOURCES_COLLECTION, scanSources } from "@statewalker/webrun-builder";
 import type { FilesApi } from "@statewalker/webrun-files";
 import { tryReadText, writeText } from "@statewalker/webrun-files";
 import {
@@ -21,7 +21,13 @@ import {
   type UrlPolicy,
 } from "@statewalker/webrun-modules";
 import { newTailwindTransform, tailwindCacheKey } from "@statewalker/webrun-tailwind";
-import { SERVED_COLLECTION, toProjectId, walkEntry, webrunBuilders } from "./builders.js";
+import {
+  PREPROCESS_BUILDER,
+  SERVED_COLLECTION,
+  toProjectId,
+  walkEntry,
+  webrunBuilders,
+} from "./builders.js";
 import type { WebrunBuildHost } from "./host.js";
 import { makeExtMapPolicy } from "./url-policy.js";
 
@@ -79,13 +85,18 @@ function normalizeEntry(path: string): string {
 /** The public entry points `package.json` declares, as project-relative paths. */
 export function packageEntryPoints(manifest: Record<string, unknown>): string[] {
   const out = new Set<string>();
+  // Type declarations are not modules: a `types` condition or a `.d.ts` target
+  // is skipped, never walked.
   const add = (v: unknown) => {
-    if (typeof v === "string" && !v.includes("*")) out.add(normalizeEntry(v));
+    if (typeof v === "string" && !v.includes("*") && !/\.d\.[cm]?ts$/.test(v))
+      out.add(normalizeEntry(v));
   };
   const walk = (v: unknown) => {
     if (typeof v === "string") add(v);
     else if (Array.isArray(v)) v.forEach(walk);
-    else if (v && typeof v === "object") Object.values(v).forEach(walk);
+    else if (v && typeof v === "object") {
+      for (const [condition, target] of Object.entries(v)) if (condition !== "types") walk(target);
+    }
   };
   add(manifest.main);
   add(manifest.module);
@@ -177,13 +188,15 @@ export function newProjectBuild(opts: ProjectBuildOptions): ProjectBuild {
   // Engine state (rows, queue, traces) lives in the project's `.project/state`
   // folder — a dot-folder, so the scanner never sees it.
   let engine: BuildEngine | undefined;
+  const openEngine = async () =>
+    (engine ??= new BuildEngine({
+      store: await FilesKV.open(project, "/.project/state"),
+      builders: webrunBuilders(host),
+    }));
 
   return {
     async build() {
-      engine ??= new BuildEngine({
-        store: await FilesKV.open(project, "/.project/state"),
-        builders: webrunBuilders(host),
-      });
+      const engine = await openEngine();
       await scanSources(engine, { files: project, root: "/" });
       // Retry what failed last time: a source's closure reads files the engine
       // does not track (its dependencies), so fixing one would not re-queue it.
@@ -216,8 +229,10 @@ export function newProjectBuild(opts: ProjectBuildOptions): ProjectBuild {
         }
       }
       const reached = new Set<string>();
+      const reachedIds = new Set<string>();
       for (const entry of entries) {
         for (const id of await walkEntry(toProjectId(entry), host)) {
+          reachedIds.add(id);
           reached.add(ctx.policy.emittedPath(id));
         }
       }
@@ -231,6 +246,15 @@ export function newProjectBuild(opts: ProjectBuildOptions): ProjectBuild {
         removed.push(info.path);
       }
       for (const path of removed) await cache.remove(path);
+      // A source outside the closure may import a proxy just removed. Queue every
+      // such source, so the next build re-walks it and re-emits what it imports
+      // instead of skipping it as unchanged and leaving a broken import behind.
+      if (removed.length > 0) {
+        const engine = await openEngine();
+        for (const key of await engine.keys(SOURCES_COLLECTION)) {
+          if (!reachedIds.has(toProjectId(key))) await engine.requeue(PREPROCESS_BUILDER, key);
+        }
+      }
       // Forget the pruned proxies' accumulated shapes, so a later build in this
       // process starts them afresh, as a new process would.
       for (const id of [...ctx.proxies.keys()]) {
