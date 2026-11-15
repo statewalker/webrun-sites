@@ -10,9 +10,29 @@ export const SERVED_COLLECTION = "served";
 /** Sources the transform builds as entries: JS/TS modules, CSS and JSON. */
 const ENTRY = /\.(?:(?:m|c)?[jt]sx?|css|json)$/;
 
+/**
+ * Walk one entry's closure and write its static emit forms; returns every
+ * reachable id. Shared by the builder's `run` and by `ProjectBuild.prune`, so a
+ * prune walk leaves the emitted tree exactly as a build would.
+ */
+export async function walkEntry(id: string, host: WebrunBuildHost): Promise<string[]> {
+  host.emitted.clear();
+  const ids = await walkFrom(id, host.ctx);
+  // Static emit forms: JSON is idempotent (re-derived from raw source), so
+  // always (re)form it; a CSS injector is re-wrapped ONLY for a freshly
+  // emitted node — the raw stylesheet `walkFrom` overwrites `emitted` with
+  // is only present when the transform actually ran (else it's already the
+  // wrapped `.js`, which must not be double-wrapped).
+  await emitBuildForms(
+    ids.filter((x) => x.endsWith(".json") || isAsset(x) || host.emitted.has(x)),
+    host.ctx,
+  );
+  return ids;
+}
+
 /** Map a scanned project-relative source uri (`src/main.tsx`) to its core id
  *  (`~/src/main.tsx`) — the `~/` id-space the preprocess core reads project files in. */
-function toProjectId(uri: string): string {
+export function toProjectId(uri: string): string {
   return `~/${uri}`;
 }
 
@@ -39,17 +59,7 @@ export function webrunBuilders(host: WebrunBuildHost): BuilderDef[] {
       async run(ctx) {
         if (!ENTRY.test(ctx.key)) return;
         const id = toProjectId(ctx.key);
-        host.emitted.clear();
-        const ids = await walkFrom(id, host.ctx);
-        // Static emit forms: JSON is idempotent (re-derived from raw source), so
-        // always (re)form it; a CSS injector is re-wrapped ONLY for a freshly
-        // emitted node — the raw stylesheet `walkFrom` overwrites `emitted` with
-        // is only present when the transform actually ran (else it's already the
-        // wrapped `.js`, which must not be double-wrapped).
-        await emitBuildForms(
-          ids.filter((x) => x.endsWith(".json") || isAsset(x) || host.emitted.has(x)),
-          host.ctx,
-        );
+        await walkEntry(id, host);
         ctx.emit(SERVED_COLLECTION, host.ctx.policy.emittedPath(id), ctx.key);
       },
       async dispose(key) {
