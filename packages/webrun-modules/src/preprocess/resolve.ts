@@ -213,7 +213,8 @@ function shapePath(pid: string, ctx: PreprocessContext): string {
 
 /**
  * Seed `ctx.proxies` for `pid` from its durable sidecar, ONCE per run, before the
- * caller merges its own shape in.
+ * caller merges its own shape in. Without a usable sidecar, the shape is read back
+ * from the emitted proxy itself (`shapeFromArtifact`).
  *
  * `ctx.proxies` is per-run in-memory state but the emitted proxy is durable, and a
  * shared proxy's export surface is the union of ALL its importers'. An incremental
@@ -239,10 +240,9 @@ async function seedProxyShape(
   if (ctx.proxies.has(pid)) return; // already touched in this run — nothing to seed
   await singleFlight(ctx, `proxyseed:${pid}`, async () => {
     const raw = await tryReadText(ctx.cache, shapePath(pid, ctx));
-    if (!raw) return;
     let imp: ModuleImport | undefined;
     try {
-      const parsed = JSON.parse(raw) as Partial<ModuleImport>;
+      const parsed = raw ? (JSON.parse(raw) as Partial<ModuleImport>) : undefined;
       if (Array.isArray(parsed?.names)) {
         imp = {
           names: parsed.names.filter((n): n is string => typeof n === "string"),
@@ -251,13 +251,43 @@ async function seedProxyShape(
         };
       }
     } catch {
-      imp = undefined; // a corrupt sidecar degrades to the pre-seed behaviour
+      imp = undefined; // corrupt: recovered from the artifact below
     }
+    // No usable sidecar (a cache from before the sidecars, or one deleted or
+    // corrupted by hand): recover the shape from the emitted proxy itself, so this
+    // run cannot narrow it to the importers it happens to walk.
+    imp ??= await shapeFromArtifact(pid, ctx);
     if (!imp) return;
     // `grew` is discarded: the run's first touch of this pid re-emits unconditionally
     // anyway, so nothing here needs to request a write.
     mergeProxyShape(pid, binding, imp, ctx);
   });
+}
+
+/**
+ * The import shape an already-emitted proxy serves, read from its own exports: its
+ * named exports become `names`, an `export default` sets `hasDefault`. Seeding with
+ * it re-emits a superset of what the artifact exported (a `host` namespace proxy's
+ * extra keys come back as names). A wholesale `export *` proxy enumerates nothing
+ * and cannot narrow anyway. `undefined` when there is no artifact or it does not
+ * parse.
+ */
+async function shapeFromArtifact(
+  pid: string,
+  ctx: PreprocessContext,
+): Promise<ModuleImport | undefined> {
+  const body = await tryReadText(ctx.cache, ctx.policy.emittedPath(pid));
+  if (!body) return undefined;
+  try {
+    const { exports } = await analyze(body, "esm");
+    return {
+      names: exports.filter((n) => n !== "default"),
+      hasDefault: exports.includes("default"),
+      hasNamespace: false,
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 /**

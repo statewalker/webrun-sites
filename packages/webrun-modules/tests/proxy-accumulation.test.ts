@@ -5,7 +5,7 @@ import type {
   ListOptions,
   ReadOptions,
 } from "@statewalker/webrun-files";
-import { readText } from "@statewalker/webrun-files";
+import { readText, writeText } from "@statewalker/webrun-files";
 import { MemFilesApi } from "@statewalker/webrun-files-mem";
 import { describe, expect, it } from "vitest";
 import type { PreprocessContext } from "../src/preprocess/context.js";
@@ -159,5 +159,65 @@ describe("proxy shape accumulation", () => {
     const body = await readText(cache, "/t/browser/~/~deps/~globals.js");
     expect(body).toContain("as process }");
     expect(body).toContain("as Buffer }");
+  });
+
+  it("seeds from the emitted proxy when its .shape.json sidecar is missing (#3)", async () => {
+    // A cache from a release before the sidecars, or one whose sidecar was deleted:
+    // a fresh run walking ONE importer must not narrow the proxy to its names.
+    const cache = new MemFilesApi();
+    const body = "/t/browser/~/~deps/react/index.js";
+    const run1 = mkCtx(cache);
+    await ensureProxy(
+      PID,
+      HOST,
+      { names: ["useState"], hasDefault: true, hasNamespace: false },
+      run1,
+    );
+    await ensureProxy(
+      PID,
+      HOST,
+      { names: ["useEffect"], hasDefault: false, hasNamespace: false },
+      run1,
+    );
+    await cache.remove(`${body}.shape.json`);
+
+    const run2 = mkCtx(cache); // a fresh process: empty accumulator, no sidecar
+    await ensureProxy(
+      PID,
+      HOST,
+      { names: ["useRef"], hasDefault: false, hasNamespace: false },
+      run2,
+    );
+    const out = await readText(cache, body);
+    expect(out).toContain("export const useState = __m.useState");
+    expect(out).toContain("export const useEffect = __m.useEffect");
+    expect(out).toContain("export const useRef = __m.useRef");
+    expect(out).toContain("export default __m;");
+    // …and the sidecar is back, so the next run seeds from it as usual.
+    expect(JSON.parse(await readText(cache, `${body}.shape.json`)).names).toEqual(
+      expect.arrayContaining(["useState", "useEffect", "useRef"]),
+    );
+  });
+
+  it("seeds from the emitted proxy when its sidecar is corrupt (#3)", async () => {
+    const cache = new MemFilesApi();
+    const body = "/t/browser/~/~deps/react/index.js";
+    await ensureProxy(
+      PID,
+      HOST,
+      { names: ["useState"], hasDefault: false, hasNamespace: false },
+      mkCtx(cache),
+    );
+    await writeText(cache, `${body}.shape.json`, "{not json");
+
+    await ensureProxy(
+      PID,
+      HOST,
+      { names: ["useRef"], hasDefault: false, hasNamespace: false },
+      mkCtx(cache),
+    );
+    const out = await readText(cache, body);
+    expect(out).toContain("export const useState = __m.useState");
+    expect(out).toContain("export const useRef = __m.useRef");
   });
 });
