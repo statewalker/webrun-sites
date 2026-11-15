@@ -304,16 +304,20 @@ function mergeProxyShape(
   const names = new Set(prev.imp.names);
   const before = names.size;
   for (const n of imp.names) names.add(n);
-  let grew = names.size !== before;
-  prev.imp.names = [...names];
-  if (imp.hasDefault && !prev.imp.hasDefault) {
-    prev.imp.hasDefault = true;
-    grew = true;
-  }
-  if (imp.hasNamespace && !prev.imp.hasNamespace) {
-    prev.imp.hasNamespace = true;
-    grew = true;
-  }
+  const hasDefault = prev.imp.hasDefault || imp.hasDefault;
+  const hasNamespace = prev.imp.hasNamespace || imp.hasNamespace;
+  const grew =
+    names.size !== before ||
+    hasDefault !== prev.imp.hasDefault ||
+    hasNamespace !== prev.imp.hasNamespace;
+  // Replace the entry rather than mutate it: a reader holding an earlier
+  // `ctx.proxies.get(pid)` keeps a consistent snapshot instead of seeing it change
+  // under it.
+  if (grew)
+    ctx.proxies.set(pid, {
+      binding: prev.binding,
+      imp: { names: [...names], hasDefault, hasNamespace },
+    });
   return grew;
 }
 
