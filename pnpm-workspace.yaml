@@ -40,12 +40,12 @@ catalog:
   esbuild-wasm: ^0.28.2
   "@jridgewell/trace-mapping": ^0.3.31
   vite: ^8.3.2
-  "@statewalker/content-extractors": "^0.2.3"
+  "@statewalker/content-extractors": "^0.3.0"
   "@statewalker/indexer-api": "^0.1.3"
-  "@statewalker/indexer-chunker": "^0.1.2"
-  "@statewalker/indexer-core": "^0.1.2"
+  "@statewalker/indexer-chunker": "^0.2.0"
+  "@statewalker/indexer-core": "^0.4.0"
   "@statewalker/indexer-fulltext": "^0.1.3"
-  "@statewalker/indexer-mem-minisearch": "^0.1.3"
+  "@statewalker/indexer-mem-minisearch": "^0.5.0"
   "@statewalker/indexer-vector": "^0.1.3"
   "@statewalker/webrun-files": "^0.12.0"
   "@statewalker/webrun-files-mem": "^0.12.0"
