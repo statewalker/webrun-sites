@@ -3488,8 +3488,8 @@ packages:
     resolution: {integrity: sha512-kQK9LGGFiHtrWiNhZtA7Qbw17AQz+dmsEKODRIVTXA9+e5MS/2gZEBhYJt13GrAz5/IOZKddH/0Z3TP/Zgo+yw==}
     engines: {node: '>=18'}
 
-  node-releases@2.0.65:
-    resolution: {integrity: sha512-PfvofsGQ+MiOQIPkX9fU8ELUWmy5zL74CdQaph/ismKszfFkfwXaw0cGiwbwym2hT9k5+mdyl8O5WQ1MD8EHmA==}
+  node-releases@2.0.66:
+    resolution: {integrity: sha512-uSMWN9/XtWzxaE0d9ZNHe00Hda6028AXH3WRjTsK71neiPCSeL5nGSD9MXTQX/6Qx0k7Op1AyyinmIUw9fBzrg==}
     engines: {node: '>=18'}
 
   normalize-path@3.0.0:
@@ -6270,7 +6270,7 @@ snapshots:
       baseline-browser-mapping: 2.11.39
       caniuse-lite: 1.0.30001828
       electron-to-chromium: 1.5.494
-      node-releases: 2.0.65
+      node-releases: 2.0.66
       update-browserslist-db: 1.4.0(browserslist@4.29.6)
     optional: true
 
@@ -7737,7 +7737,7 @@ snapshots:
 
   node-releases@2.0.57: {}
 
-  node-releases@2.0.65:
+  node-releases@2.0.66:
     optional: true
 
   normalize-path@3.0.0: {}
