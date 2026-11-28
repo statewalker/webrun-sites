@@ -2364,8 +2364,8 @@ packages:
   caniuse-lite@1.0.30001814:
     resolution: {integrity: sha512-/Uaf1lAzr59XcMpW0o96WoEfr+VXK2OX4U9AgFoiSHsVJ4HppnIFUjtYzsyDH2+tgANaQb2/oxYGwCPapN1FpA==}
 
-  caniuse-lite@1.0.30001828:
-    resolution: {integrity: sha512-7MWeT+3DlrpuDybTWHl4Zb1Z80Z1fLLnOXuBjDXebzDVcqnEWUlV8JcbASg8B8BhcW8QT2UiR1KAtzYFIZHZYA==}
+  caniuse-lite@1.0.30001829:
+    resolution: {integrity: sha512-FeVvlaVr3r+cdHIYXyZhtVkqroSYjYaoNxItxQNjusurUE+IqODawDsbzk02HJgi2RdKiaGGFm+EKbXku+yITg==}
 
   cborg@6.1.3:
     resolution: {integrity: sha512-Kb/wD/AFuVcqvVjR+HYNOjNiuhVJ2C+RWxQE2Yqq2WVlVkRjdvVLkkM6QsL3NMsBRh+rgNc+aXmcraA+X0HObQ==}
@@ -6268,7 +6268,7 @@ snapshots:
   browserslist@4.29.6:
     dependencies:
       baseline-browser-mapping: 2.11.40
-      caniuse-lite: 1.0.30001828
+      caniuse-lite: 1.0.30001829
       electron-to-chromium: 1.5.495
       node-releases: 2.0.66
       update-browserslist-db: 1.4.0(browserslist@4.29.6)
@@ -6317,7 +6317,7 @@ snapshots:
 
   caniuse-lite@1.0.30001814: {}
 
-  caniuse-lite@1.0.30001828:
+  caniuse-lite@1.0.30001829:
     optional: true
 
   cborg@6.1.3: {}
